@@ -1,3 +1,5 @@
+<img width="2525" height="1877" alt="image" src="https://github.com/user-attachments/assets/1b67ff5b-33be-4a93-98b1-f7c11a563330" />
+
 # VileMK
 
 Tooling for authoring ZMK keymaps by hand, covering the things ZMK Studio
