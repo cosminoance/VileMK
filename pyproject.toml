@@ -1,0 +1,37 @@
+# The Python equivalent of package.json. `dependencies` is empty on purpose:
+# every tool here runs on the standard library alone, so there is nothing to
+# install before using them. Installing this project only puts the four
+# commands on your PATH.
+
+[project]
+name = "vilemk"
+version = "0.1.0"
+description = "Read, check and view ZMK keymaps from a zmk-cli config repo"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6"]
+
+[project.scripts]
+vilemk-ui = "vilemk.webui.build:main"
+vilemk-keypos = "vilemk.keypos:main"
+vilemk-check = "vilemk.check:main"
+vilemk-design = "vilemk.webui.server:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# One package, `vilemk`, with `webui` under it.
+packages = ["vilemk", "vilemk.webui"]
+
+[tool.setuptools.package-data]
+# The page is a real .html file, not a Python string - it has to ship.
+"vilemk.webui" = ["template.html"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
