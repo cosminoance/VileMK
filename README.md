@@ -1,6 +1,14 @@
 
 
-# VileMK
+<p align="center">
+  <img src=".github/images/logo-banner.png" alt="VileMK" width="480">
+</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=jn9MJbdGJI8">
+    <img src="https://i.ytimg.com/vi/jn9MJbdGJI8/maxresdefault.jpg" alt="VileMK - local zmk visual remapper" width="480">
+  </a>
+</p>
 
 Tooling for authoring ZMK keymaps by hand, covering the things ZMK Studio
 can't express: combos, macros, VileDances (Vial-style tap/hold/double-tap

@@ -1,7 +1,7 @@
 """Fill `template.html` with one keymap payload, and write it out.
 
 The template is a plain HTML file, not a Python string: it is edited, linted and
-diffed as HTML. This module is the only seam between it and the data - four
+diffed as HTML. This module is the only seam between it and the data - six
 placeholders, substituted once, no template engine. It is read from disk on
 every call, so editing `template.html` shows up on the next page load without
 restarting the server.
@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import json
 import os
@@ -28,6 +29,7 @@ import sys
 
 from .. import keymap, keypos
 
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "template.html")
 
 
@@ -37,9 +39,25 @@ def template() -> str:
         return fh.read()
 
 
+def _data_uri(asset_name: str) -> str:
+    """A small PNG under `assets/`, as a `data:` URI.
+
+    The page is emitted as one self-contained HTML file with no static-file
+    route (see `server.Handler.do_GET`), so an `<img src="assets/logo.png">`
+    would 404 the moment the page is served live or copied away from the
+    repo. Inlining keeps the *output* self-contained without putting the
+    base64 itself in `template.html`, which is edited and diffed as HTML.
+    """
+    with open(os.path.join(ASSETS_DIR, asset_name), "rb") as fh:
+        encoded = base64.b64encode(fh.read()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 def build_html(data: dict) -> str:
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     return (template()
+            .replace("__FAVICON__", _data_uri("favicon.png"))
+            .replace("__LOGO__", _data_uri("logo.png"))
             .replace("__REPO__", html.escape(data["repo"]))
             .replace("__REPOPATH__", html.escape(data.get("repo_path", data["repo"])))
             .replace("__GENERATED__", html.escape(data["generated"]))

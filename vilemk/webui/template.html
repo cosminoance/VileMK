@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VileMK &middot; __REPO__</title>
+<link rel="icon" type="image/png" href="__FAVICON__">
 <style>
 :root{
   --bg:#f6f7f9; --panel:#fff; --ink:#15181d; --muted:#69707d; --line:#dfe3ea;
@@ -22,9 +23,11 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-header{display:flex;gap:12px;align-items:baseline;padding:10px 16px;
+header{display:flex;gap:12px;align-items:center;padding:10px 16px;
   border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
-header h1{font-size:15px;margin:0;font-weight:600}
+header .brand{display:inline-flex;align-items:center;background:#14171c;border-radius:6px;
+  padding:5px 10px;line-height:0}
+header .brand img{display:block;height:20px;width:auto}
 header .meta{color:var(--muted);font-size:12px}
 .wrap{display:flex;align-items:flex-start}
 aside{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel);
@@ -172,7 +175,7 @@ button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
 </head>
 <body>
 <header>
-  <h1>VileMK</h1>
+  <span class="brand"><img src="__LOGO__" alt="VileMK"></span>
   <span class="meta">__REPOPATH__ &middot; generated __GENERATED__ &middot; <span id="mode"></span></span>
 </header>
 <div class="wrap">
