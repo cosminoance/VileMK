@@ -1,4 +1,4 @@
-<img width="2525" height="1877" alt="image" src="https://github.com/user-attachments/assets/1b67ff5b-33be-4a93-98b1-f7c11a563330" />
+
 
 # VileMK
 
@@ -94,40 +94,212 @@ uv tool install --editable .    # or: pip install -e .
 | `python3 -m vilemk.check config/<board>.keymap` | Static validation before a CI round-trip: binding counts per layer, out-of-range positions, undefined `&labels`, bad keycodes, arity, braces. It also reads `build.yaml` and flags halves built from different keymaps, a `KEYMAP_FILE` that names nothing, a part the vendor builds that your entry leaves out, and colliding artifact names. Pass `--no-build-list` for keymaps only. |
 | `python3 -m vilemk.webui.server` | The same viewer, but editable: design VileDances, macros, combos, modifiers and layer bindings in Vial-style panels, click keys to reassign them, save to `custom/` and `variants/`. |
 
-### Designing VileDances, macros, combos, modifiers and layers
+### Designing a keymap: every tab in the app
 
 ```bash
 make design
 ```
 
-This opens the viewer at `http://127.0.0.1:7879` with six extra tabs:
-**Media & system**, **VileDance**, **Macros**, **Combos**, **Modifiers** and
-**Layers**. The Layers tab covers layer switching in all five of ZMK's shapes
-(`&mo`, `&lt`, `&sl`, `&tog`, `&to`), conditional layers included, such as the
-tri-layer rule where holding 1 and 2 together turns 3 on. Each design is saved
-under `custom/`. A plain layer binding needs no saving: the key picker builds
-one for any layer in one click.
+This opens the viewer at `http://127.0.0.1:7879` with one board on screen and
+a menu of eight tabs underneath it: **Keyboard**, **Media & system**,
+**VileDance**, **Macros**, **Modifiers**, **Layers**, **Combos** and
+**Conditional layers**.
 
-A **macro** is a sequence played back from one key: text, taps, a modifier
-held across them, a wait. Type the text you want as one step
-(`someone@example.com` is one field here, not nineteen `&macro_tap` lines) and
-the expansion into keycodes happens when the keymap is written.
+Click a key on the board to open its editor. Whichever tab you're on, picking
+something fills that key. Instead of a key, you can open one of the tabs'
+**+ New …** buttons, which opens a creation panel above the menu; the menu
+then fills whatever field in that panel you last clicked, the same way. Only
+one thing (a key editor or a panel) is ever open at once, but nothing you
+typed is lost by switching: each kind keeps its own unsaved draft, and the tab
+you left grows a **Resume …** button until you either finish it or start a
+fresh one.
 
-**Media & system** saves nothing. It is the list of keys a keyboard has no
-keycap for: volume and the other media codes, mouse buttons and pointer
-movement, `&bt` profiles and `&out`, underglow and backlight, `&bootloader` /
-`&sys_reset` / `&soft_off` / `&studio_unlock`, and one-shot (`&sk`) or latched
-(`&kt`) modifiers. Each group says what a board needs before its keys do
-anything, and saving a variant adds the `dt-bindings` headers those bindings
-need.
+Six of the eight tabs work this way — they fill a field. The last two,
+**Combos** and **Conditional layers**, don't: nothing on the board can point
+at a combo or a conditional layer, so instead of picking one into a key you
+switch it on or off for the keymap you're looking at. Both kinds are covered
+below.
 
-The **Save as new variant** button writes `variants/<name>.keymap`: your base
-keymap with the keys you reassigned, plus only the generated behaviors those
-keys actually reference. Anything you designed but never bound stays out of
-the keymap. Combos and conditional layers go on no key, so they are switched
-on per keymap in their own tabs. A saved variant can then be rewritten in
-place (**Save to ‹name›**) or removed (**Delete variant**). `config/` and the
-vendor defaults are only ever read.
+#### Keyboard
+
+The plain 104-key ANSI layout. Click a key on the board to open its editor,
+then click a key on this tab: that assigns the keycode straight away, no
+separate confirm step. Typing a binding by hand into the key editor's own
+field still needs **Apply**.
+
+<img src=".github/images/tab-keyboard.png" width="560" alt="The Keyboard tab's picker: the 104-key ANSI board, with Tab picked for the open key">
+
+#### Media & system
+
+Everything ZMK can send that a keyboard has no keycap for, in seven groups:
+
+| group | examples | what the board needs |
+|---|---|---|
+| Media and consumer | volume, play/pause, brightness | nothing — every board sends these |
+| Mouse | left/right/middle click, pointer movement, scroll | `CONFIG_ZMK_POINTING` |
+| Bluetooth and output | profile select, clear, USB/BLE output | a wireless board |
+| Lighting | underglow and backlight on/off, brightness, effect | the LEDs, plus the matching Kconfig |
+| Power and firmware | soft off, bootloader, reset, Studio unlock | reset and bootloader are universal; the rest are not |
+| Typing extras | caps word, key repeat, grave escape | nothing |
+| Sticky and locked keys | one-shot (`&sk`) and latched (`&kt`) over the eight modifiers | nothing |
+
+Each group names what has to be true of the board before its buttons do
+anything real — a binding whose feature the firmware was never built with
+doesn't misbehave, it fails to compile. Saving a variant adds whatever
+`#include` lines those bindings need, and says so in the save message; you
+never add them by hand.
+
+This tab saves nothing itself. There's no record and no card — it's a picker,
+same as Keyboard.
+
+<img src=".github/images/tab-media-system.png" width="560" alt="The Media & system tab's picker: seven labelled groups of buttons, from media codes to sticky modifiers">
+
+#### VileDance — Vial-style tap dances
+
+Vial, the QMK-world editor this project takes its name from, has a
+**TapDance** key: one key position, up to four different outputs depending on
+how you hit it — a tap, a hold, a double tap, or a double tap where the
+second press is held. ZMK has nothing that does all four in one behavior;
+getting a hold *and* a double-tap out of a single key means nesting a
+hold-tap inside a tap-dance. A **VileDance** is that composition, built for
+you from four fields:
+
+| slot | fires on |
+|---|---|
+| on tap | a single press and release |
+| on hold | pressing and holding past the tapping term |
+| on double tap | two presses within the tapping term |
+| on tap + hold | the second press held down |
+
+Fill only **on tap** and you get a plain key — no extra devicetree at all.
+Add **on hold** and it becomes one hold-tap behavior. Add **on double tap**
+(and optionally **on tap + hold**) and it becomes a tap-dance holding one or
+two hold-taps. A hold slot has to be a behavior that takes exactly one
+parameter — `&kp`, `&mo`, `&sk` — not something that takes none.
+
+Two settings shape the timing: **tapping term** (how long a hold has to last,
+and how much time a second tap has to land in) and **flavor**, which decides
+how the hold-tap resolves an interrupting keystroke. The tap/hold pair keeps
+whatever flavor you set; the double-tap/tap-hold pair always resolves fast
+(`balanced`) regardless, because by the second press you've already committed
+to something other than plain typing — a layer-hold there should engage the
+instant the next key lands, not wait out a second tapping term. Because a
+tap-dance's own term runs before the nested hold-tap's does, a plain hold on
+this key lands at roughly *twice* the tapping term you set — worth knowing
+before you tune it down.
+
+A VileDance can't hold another VileDance in one of its own four slots — a
+tap-dance inside a tap-dance is a keyboard nobody could predict the timing
+of — but it can hold a **macro** in the double-tap or tap-hold slot. "Double
+tap to type my email" is exactly the kind of thing a macro slot is for.
+
+A saved VileDance is a live reference, not a copy: bind it to as many keys as
+you like, and editing the record later changes every one of them the next
+time you save a variant. The board tile for a key bound to one shows the
+resolved tap with a small hint for the hold in the corner, rather than the
+raw generated label.
+
+<img src=".github/images/tab-viledance.png" width="380" alt="The VileDance panel: Name, four slots, tapping term and flavor, over Save/Devicetree/Close/Delete">
+
+#### Macros
+
+A **macro** is a sequence played back from one key, built from six kinds of
+step:
+
+| step | does |
+|---|---|
+| text | types the string you enter — the reason this tab exists; one field for `someone@example.com`, not nineteen individual key steps |
+| tap | presses and releases one binding |
+| press | holds a binding down across the steps that follow |
+| release | lets a held binding go |
+| wait | pauses for a number of milliseconds |
+| pause | stops until the key the macro is bound to is itself released |
+
+Add steps with the buttons at the bottom of the panel, reorder two with the
+↑/↓ next to each row, remove one with ✕. A text step only understands what a
+keyboard can actually type — letters, digits, the shifted symbols, space, tab,
+newline; anything else (accented letters, emoji) is refused rather than
+silently dropped, since there's no key position for it to send. There's also
+a hard ceiling on how much one macro can queue at once (ZMK's own
+`CONFIG_ZMK_BEHAVIORS_QUEUE_SIZE`, 64 by default) — a macro over that limit is
+refused at save time rather than failing partway through on the actual
+keyboard.
+
+A macro can't hold itself as one of its own steps, but it can hold another
+saved macro, and can be the target of a VileDance slot or a combo's output.
+
+<img src=".github/images/tab-macros.png" width="420" alt="The Macros panel: a saved ctrl+alt+delete macro, six press/release steps with reorder and delete controls">
+
+#### Modifiers
+
+A chain of up to three [ZMK modifier
+functions](https://zmk.dev/docs/keymaps/modifiers) — shift, control, alt, gui,
+each left or right — wrapped around a keycode, e.g. ctrl+shift+A. Click up to
+three of the eight modifier buttons in the panel (**remove last** / **clear**
+to walk them back), then use the menu below to fill **Parameter** with the
+key they wrap — a plain key, or another saved modifier, nested inside this
+one's innermost slot.
+
+Unlike a VileDance, a modifier's resolved text is baked in wherever you pick
+it — there's no reference back to the saved record, because a modifier chain
+isn't a devicetree behavior, just ZMK preprocessor syntax. Editing a saved
+modifier later doesn't change a key that already picked it; re-pick it to
+propagate the change.
+
+<img src=".github/images/tab-modifiers.png" width="560" alt="The Modifiers panel: a saved ctrl+shift+F10 chain, the eight modifier buttons, and the resolved Parameter">
+
+#### Layers
+
+Layer switching in all five of ZMK's shapes, as ad-hoc one-click rows at the
+top of the tab — no saving needed, since a layer number is the whole story
+for four of them:
+
+| row | behavior | what it does |
+|---|---|---|
+| Hold | `&mo` | layer on while held, off on release |
+| Tap key / hold layer | `&lt` | tap for a key, hold for the layer |
+| Sticky | `&sl` | one shot — on for the next key press only |
+| Toggle | `&tog` | on until the same key is pressed again |
+| Switch to | `&to` | switches to this layer and turns every other one off |
+
+**Tap key / hold layer** is the one row worth naming and saving: give it a
+tapping term or a flavor and it becomes its own generated hold-tap, with the
+same live-reference behavior a VileDance has — a saved card you can bind to
+several keys and edit in one place. Leave both blank and it's the same plain
+`&lt` the ad-hoc row builds for free.
+
+The Layers tab is also where you add a layer to the keyboard: a **+ layer**
+button next to the layer tabs above the board, up to ZMK's own 32-layer cap.
+It prompts for a name and starts the layer blank (every key `&trans`) until
+you assign something into it; nothing is written until you save a variant.
+
+<img src=".github/images/tab-layers.png" width="560" alt="The Layers tab's picker: the five ad-hoc rows, one button per layer, with two saved layer-tap cards below">
+
+#### Combos and Conditional layers
+
+The two board-wide tabs. A **combo** fires a binding when two or more keys on
+the board are pressed together — open its panel and click the keys on the
+board above to build the chord, same board, no separate picker. A
+**conditional layer** turns a layer on automatically while two or more other
+layers are held together (the common case: hold layer 1 and layer 2, get
+layer 3).
+
+Neither goes on a key, so neither can be picked into a field. What you decide
+instead is whether *this keymap* gets it: each row has an On/Off switch, and
+it's per keymap file — the same combo can be on for one variant and off for
+another. A newly created one is switched on only for the keymap you designed
+it against; flip it on for others yourself.
+
+<img src=".github/images/tab-combos.png" width="380" alt="The Combos panel: a saved chord's Name, Keys, Output key and Timeout"> <img src=".github/images/tab-conditional-layers.png" width="380" alt="The Conditional layers panel: a saved tri-layer rule's Name, If layers and Then layer">
+
+#### Saving
+
+Every design above is written to `custom/` as you work, independent of any
+keymap. Nothing reaches a keymap file until you save a variant — see ["Save
+your work as a variant and hand it
+back"](#working-in-tandem-with-the-zmk-config-repo) above. Only the generated
+behaviors your keys, VileDances and combos actually reference are written;
+anything designed but never bound stays out of the file entirely.
 
 ### make
 
