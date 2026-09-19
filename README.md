@@ -6,7 +6,8 @@
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=jn9MJbdGJI8">
-    <img src="https://i.ytimg.com/vi/jn9MJbdGJI8/maxresdefault.jpg" alt="VileMK - local zmk visual remapper" width="480">
+    <img src="https://i.ytimg.com/vi/jn9MJbdGJI8/maxresdefault.jpg" alt="VileMK - local zmk visual remapper" width="480"><br>
+    <img src="https://img.shields.io/badge/-Watch%20on%20YouTube-red?logo=youtube&logoColor=white&style=for-the-badge" alt="Watch on YouTube">
   </a>
 </p>
 
