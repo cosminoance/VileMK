@@ -82,6 +82,19 @@ function wirePanel(km){
   $("#close").onclick = () => { state.emode = null; state.dts = null; say(null); render(); };
 }
 
+// What both a save and a delete end with. Either way the panel has nothing left
+// to say about a record that is now on disk or gone from it, so the editor area
+// closes and the menu lands on that kind's own tab - where the new card is, or
+// where the deleted one no longer is. The draft goes back to blank with it:
+// leaving it would grow a **Resume** button for something already dealt with.
+// The mode names and the tab values are the same strings, which is the whole of
+// the mapping (`conditional` included, though it saves as kind `layer`).
+function leavePanel(mode){
+  state.emode = null; state.dts = null;
+  state.drafts[mode] = BLANK[mode]();
+  state.ptab = mode; state.picker = true;
+}
+
 async function saveItem(mode, kind, d){
   // A brand-new board-wide record is switched on for the keymap it was designed
   // against and nowhere else - that is the "off unless you say so" rule, minus
@@ -94,13 +107,7 @@ async function saveItem(mode, kind, d){
   try {
     const r = await api("POST", "/api/" + kind, {...d, kind});
     STORE = r.custom; say("saved " + r.saved);
-    // It is a saved record now, so the panel has nothing left to say: close the
-    // editor area and put the menu on that kind's own tab, where the thing just
-    // saved is a card (or a row). The draft goes back to blank with it - leaving
-    // it would grow a **Resume** button for something already saved.
-    state.emode = null; state.dts = null;
-    state.drafts[mode] = BLANK[mode]();
-    state.ptab = mode; state.picker = true;
+    leavePanel(mode);
   } catch (e){ say(e.message, true); }
   render();
 }
@@ -119,7 +126,8 @@ async function deleteItem(mode, kind, d){
   if (!confirm(`Delete ${kind} "${d.name}"?`)) return;
   try {
     const r = await api("DELETE", `/api/${kind}/${encodeURIComponent(d.name)}`);
-    STORE = r.custom; state.drafts[mode] = BLANK[mode](); say("deleted");
+    STORE = r.custom; say("deleted " + d.name);
+    leavePanel(mode);
   } catch (e){ say(e.message, true); }
   render();
 }
