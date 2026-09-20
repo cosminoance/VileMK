@@ -1,0 +1,32 @@
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;gap:12px;align-items:center;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+header .brand{display:inline-flex;align-items:center;background:#14171c;border-radius:6px;
+  padding:5px 10px;line-height:0}
+header .brand img{display:block;height:20px;width:auto}
+header .meta{color:var(--muted);font-size:12px}
+.wrap{display:flex;align-items:flex-start}
+aside{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel);
+  height:calc(100vh - 42px);overflow:auto;position:sticky;top:42px;padding:10px}
+aside input{width:100%;padding:6px 8px;margin-bottom:8px;border:1px solid var(--line);
+  border-radius:6px;background:var(--bg);color:var(--ink)}
+aside .group{font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);margin:12px 0 4px}
+aside button{display:block;width:100%;text-align:left;padding:6px 8px;border:0;
+  border-radius:6px;background:none;color:var(--ink);cursor:pointer;font:inherit}
+aside button:hover{background:var(--bg)}
+aside button.sel{background:var(--accent-soft);color:var(--accent);font-weight:600}
+aside button small{display:block;color:var(--muted);font-weight:400;font-size:11px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+main{flex:1;min-width:0;padding:16px 20px 60px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.bar h2{margin:0;font-size:17px}
+.bar .path{color:var(--muted);font-size:12px;font-family:ui-monospace,monospace}
+select,.toggle{padding:5px 8px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel);color:var(--ink);font:inherit}
+label.toggle{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px}
+.tabs button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;
+  background:var(--panel);color:var(--ink);cursor:pointer;font:inherit}
+.tabs button.sel{background:var(--accent);border-color:var(--accent);color:#fff}
