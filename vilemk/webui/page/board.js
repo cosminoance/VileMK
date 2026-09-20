@@ -238,6 +238,12 @@ function renderKeymap(){
           d.key_positions = [...list].sort((a,b) => a-b);
         } else {
           state.emode = null; state.editing = pos; state.dts = null; say(null);
+          // The menu follows the key: whatever this one holds, open the tab that
+          // holds it back. A pending edit wins over the file, same as the editor
+          // itself reads it.
+          const cur = (state.assign[state.layer] || {})[pos]
+                   ?? (layer ? layer.bindings[pos] : "");
+          state.ptab = tabForBinding(cur);
         }
         render();
       };

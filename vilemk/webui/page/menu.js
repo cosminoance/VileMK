@@ -67,3 +67,32 @@ function menuHtml(km, layer){
     + pickerBody(t.cur, ptab) + `</div></div>`;
 }
 
+// Which tab a binding belongs to. Clicking a key on the board opens its editor,
+// and the menu underneath follows it there: a thumb key holding a VileDance
+// lands on the VileDance tab with that card already highlighted, rather than on
+// whichever tab the last click left behind.
+//
+// The tests are the same ones `markPicker()` highlights with, in the same order,
+// so the tab that opens is always the tab holding the selected card. The saved
+// kinds go first - a record's own label is the most specific thing a binding can
+// be - then ZMK's built-in layer bindings, then the Media & system set (looked up
+// once, from the same table that draws it), and everything left is a keycode.
+const SYSTEM_BINDS = new Set(
+    SYSTEM.flatMap(g => g.rows.flat()).filter(e => e[1]).map(e => bindOf(e[1])));
+
+function tabForBinding(v){
+  const t = (v || "").trim();
+  if (!t) return "keyboard";
+  if ((STORE.macro || []).some(m => macroBinding(m) === t)) return "macro";
+  if ((STORE.modifier || []).some(m => modBinding(m) === t)) return "modifier";
+  if ((STORE.layer || []).some(r => (r.mode||"lt") !== "conditional"
+                                 && usesLayer(t, r))) return "layer";
+  if ((STORE.viledance || []).some(x => usesVd(t, x.name))) return "viledance";
+  if (/^&(mo|lt|sl|tog|to)\b/.test(t)) return "layer";
+  if (SYSTEM_BINDS.has(t)) return "system";
+  // A modifier chain that is nobody's saved record - `&kp LC(LS(A))`, typed in or
+  // baked in by a record since edited. The Keyboard grid has no button for it
+  // either; the Modifiers tab is at least where one gets made.
+  if (CHAIN_RE.test(codeOf(t))) return "modifier";
+  return "keyboard";
+}
