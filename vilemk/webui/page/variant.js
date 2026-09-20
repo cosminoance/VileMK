@@ -2,7 +2,9 @@
 // saving as a new one. `scope` is the keymap the board-wide switches were
 // flipped under: the server carries those flags across to the variant it writes,
 // so combos switched on while composing land in the file (see ui-server.md).
-async function saveVariant(km, over){
+// `reset` adds a `settings_reset` entry per board to the build.yaml. See the
+// "include reset" box in the variant bar, and `_reset_body()` in custom.py.
+async function saveVariant(km, over, reset){
   const name = over || ($("#vname").value || "").trim();
   if (!name) return say("give the variant a name", true) || render();
   if (!over && DATA.keymaps.some(k => k.kind === "variant" && k.name === slugify(name))
@@ -11,7 +13,7 @@ async function saveVariant(km, over){
   try {
     const r = await api("POST", "/api/variant",
                         {name, base: km.id, assignments: state.assign,
-                         scope: scopeOf(km),
+                         scope: scopeOf(km), reset: !!reset,
                          new_layers: state.newLayers[km.id] || []});
     if (r.custom) STORE = r.custom;
     state.assign = {};

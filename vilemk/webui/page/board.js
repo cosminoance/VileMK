@@ -111,6 +111,7 @@ function renderKeymap(){
     // Only `variants/` is ours to write. A config or vendor keymap can be saved
     // *from*, never over - so "Save here" exists for a variant and nothing else.
     const own = km.kind === "variant";
+    const resetOn = state.reset === null ? bindsStudioUnlock(km) : state.reset;
     h += `<div class="bar">`
        + `<span class="path">click a key to assign a VileDance or any binding</span>`
        + (dirty ? `<span class="path">${n} pending change(s)`
@@ -120,6 +121,15 @@ function renderKeymap(){
        + `<input class="kb wide" id="vname" placeholder="letters, digits, underscores"`
        + ` value="${esc(slugify(km.name) + (own ? "_2" : "_custom"))}">`
        + `<button class="${own ? "ghost" : "act"}" id="savevar">Save as new variant</button>`
+       // A keyboard ZMK Studio has written to ignores the compiled keymap at
+       // those key positions, on every boot, until the partition is wiped - and
+       // the keys that stick are the ones carrying a generated behavior, so the
+       // board looks almost right. Default this on when the keymap binds
+       // `&studio_unlock`, since that is the keymap that can hit it.
+       + `<label class="toggle" title="adds a settings_reset build per board -`
+       + ` flash it to wipe a keymap ZMK Studio stored in flash, then reflash">`
+       + `<input type="checkbox" id="vreset" ${resetOn?"checked":""}>`
+       + ` include reset</label>`
        + (dirty ? `<button class="ghost" id="clearvar">Discard</button>` : "")
        + (own ? `<button class="ghost danger" id="delvar">Delete variant</button>` : "")
        + `</div>` + msgHtml();
@@ -249,8 +259,15 @@ function renderKeymap(){
       };
     });
     wireEditor(km, layer);
-    const sv = $("#savevar"); if (sv) sv.onclick = () => saveVariant(km);
-    const sh = $("#savehere"); if (sh) sh.onclick = () => saveVariant(km, km.name);
+    // The box is the source of truth at click time: `resetOn` above lives in the
+    // markup block, and its default depends on which keymap is selected.
+    const vr = $("#vreset");
+    if (vr) vr.onchange = e => { state.reset = e.target.checked; };
+    const wantReset = () => !!(vr && vr.checked);
+    const sv = $("#savevar");
+    if (sv) sv.onclick = () => saveVariant(km, null, wantReset());
+    const sh = $("#savehere");
+    if (sh) sh.onclick = () => saveVariant(km, km.name, wantReset());
     const dv = $("#delvar"); if (dv) dv.onclick = () => deleteVariant(km);
     const cv = $("#clearvar");
     if (cv) cv.onclick = () => {

@@ -4,10 +4,21 @@ const KINDS = {config:"In this config", variant:"Saved variations", vendor:"Vend
 // panel) are the two things that can occupy the editor area above the menu, and
 // they are mutually exclusive - opening one closes the other. `ptab` is which of
 // the six menu tabs below it is showing, and it is independent of both.
+// `reset` is tri-state: null means "not chosen", and the variant bar falls back
+// to whether the keymap binds `&studio_unlock` - the keymaps whose keyboards can
+// end up ignoring the compiled keymap at the positions Studio wrote. Ticking or
+// unticking the box pins it for the session.
 const state = {id:null, layer:0, layout:0, base:"", nums:true, hot:null,
                emode:null, drafts:{}, sel:[], assign:{}, msg:null, dts:null,
                editing:null, picker:true, ptab:"keyboard",
-               refocus:null, newLayers:{}};
+               refocus:null, newLayers:{}, reset:null};
+
+// Does any layer bind ZMK Studio's unlock key? `build_yaml_for()` asks the same
+// question of the keymap text to decide on the Studio snippet and flag.
+function bindsStudioUnlock(km){
+  return (km.layers || []).some(l =>
+    (l.bindings || []).some(b => /^&?studio_unlock\b/.test(b.trim())));
+}
 const LIVE = !!DATA.live;
 let STORE = DATA.custom || {viledance:[], combo:[], modifier:[], layer:[], macro:[]};
 

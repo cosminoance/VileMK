@@ -22,7 +22,8 @@ Endpoints:
     DELETE /api/modifier/<name>   remove one
     DELETE /api/layer/<name>      remove one
     POST   /api/preview           devicetree for an unsaved item
-    POST   /api/variant           write variants/<name>/ (keymap + build.yaml)
+    POST   /api/variant           write variants/<name>/ (keymap + build.yaml;
+                                  `reset: true` adds the settings_reset entries)
     DELETE /api/variant/<name>    remove variants/<name>/
 """
 
@@ -234,7 +235,7 @@ class Handler(BaseHTTPRequestHandler):
                 text = header + text
             path, build_path, notes = custom.write_variant(
                 name, text, keyboard=km.get("keyboard") or "",
-                zmk_dir=Args(REPO).zmk)
+                zmk_dir=Args(REPO).zmk, reset=bool(rec.get("reset")))
         except (custom.EmitError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"wrote": _rel(path),
