@@ -183,4 +183,4 @@ SYSTEM.forEach(g => g.rows.forEach(_learnSystem));
     BIND_LABELS[`&mkp ${a}`] = BIND_LABELS[`&mkp ${b}`]);
 
 PICKER.forEach(_learnLabels); _learnLabels(PICKER_EXTRA);
-
+BIND_LABELS["&trans"] = PICKER_EXTRA.find(e => e[1] === "&trans")[0];

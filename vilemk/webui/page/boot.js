@@ -94,6 +94,13 @@ async function saveItem(mode, kind, d){
   try {
     const r = await api("POST", "/api/" + kind, {...d, kind});
     STORE = r.custom; say("saved " + r.saved);
+    // It is a saved record now, so the panel has nothing left to say: close the
+    // editor area and put the menu on that kind's own tab, where the thing just
+    // saved is a card (or a row). The draft goes back to blank with it - leaving
+    // it would grow a **Resume** button for something already saved.
+    state.emode = null; state.dts = null;
+    state.drafts[mode] = BLANK[mode]();
+    state.ptab = mode; state.picker = true;
   } catch (e){ say(e.message, true); }
   render();
 }
