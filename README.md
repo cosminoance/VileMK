@@ -1,5 +1,3 @@
-
-
 <p align="center">
   <img src=".github/images/logo-banner.png" alt="VileMK" width="480">
 </p>
@@ -13,8 +11,11 @@
 
 Tooling for authoring ZMK keymaps by hand, covering the things ZMK Studio
 can't express: combos, macros, VileDances (Vial-style tap/hold/double-tap
-dances), hold-taps and home-row mods, mod-morphs, conditional layers, encoder
-bindings.
+dances), hold-taps and home-row mods, mod-morphs, conditional layers.
+
+Rotary encoders are the exception. Their bindings are validated and
+documented, but not yet editable in the app; see
+[Designing a keymap](#designing-a-keymap-every-tab-in-the-app) below.
 
 The name is a nod to [Vial](https://get.vial.today/), the graphical keymap
 editor from the QMK world that inspired this project. Vial is a potion bottle;
@@ -39,7 +40,7 @@ there; firmware is built by GitHub Actions on push to that repo.
 ## Working in tandem with the ZMK config repo
 
 VileMK is the second half of a two-repo setup. The first half is ZMK's own,
-done exactly as ZMK's docs describe. VileMK starts where the CLI stops.
+done as ZMK's docs describe. VileMK starts where the CLI stops.
 
 1. **Install the ZMK CLI and create the config repo.** [Installing
    ZMK](https://zmk.dev/docs/user-setup) covers installing the CLI and running
@@ -58,8 +59,8 @@ done exactly as ZMK's docs describe. VileMK starts where the CLI stops.
    Either way the CLI ends by adding entries to `build.yaml` and copying a
    default keymap into `config/`.
 
-3. **Push once and flash the default firmware.** Optional, but a passing
-   build before any custom keymap tells you the setup itself is sound.
+3. **Push once and flash the default firmware.** Optional. A passing build
+   before any custom keymap confirms the setup itself is sound.
 
 4. **Run the VileMK server and modify the mappings:**
 
@@ -67,11 +68,10 @@ done exactly as ZMK's docs describe. VileMK starts where the CLI stops.
    make design
    ```
 
-   No flags, no keymap argument. The server finds the config repo itself, and
-   the keymap `zmk keyboard add` installed into `config/` is loaded
-   automatically as the base you edit, drawn on its real key positions. Click
-   keys to reassign them; design VileDances, macros, combos, modifiers and
-   layers on top.
+   No flags, no keymap argument. The server finds the config repo and loads
+   the keymap `zmk keyboard add` installed into `config/`, drawn on its real
+   key positions. Click keys to reassign them; design VileDances, macros,
+   combos, modifiers and layers on top.
 
 5. **Save your work as a variant and hand it back.** **Save as new variant**
    writes the modified keymap and a matching `build.yaml` under `variants/`
@@ -79,8 +79,8 @@ done exactly as ZMK's docs describe. VileMK starts where the CLI stops.
    a manual step, covered in
    ["Putting a variant on the keyboard"](#putting-a-variant-on-the-keyboard).
 
-The ZMK CLI sets up and builds, the VileMK server is where mappings change,
-and `variants/` travels between the two.
+The ZMK CLI sets up and builds. Mappings change in the VileMK server, and
+`variants/` carries them back.
 
 ## Requirements
 
@@ -99,9 +99,9 @@ uv tool install --editable .    # or: pip install -e .
 | Command | What it does |
 |---|---|
 | `python3 -m vilemk.webui.build` | Builds `keymap-ui.html`: every keymap drawn on its real key positions, with layer tabs, combos, and a compare view that highlights what a variation changed. |
-| `python3 -m vilemk.keypos config/<board>.keymap` | Prints the key-position map for a keyboard: the numbers that `key-positions` and `hold-trigger-key-positions` refer to. |
+| `python3 -m vilemk.keypos config/<board>.keymap` | Prints the key-position map for a keyboard: the numbers `key-positions` and `hold-trigger-key-positions` refer to. |
 | `python3 -m vilemk.check config/<board>.keymap` | Static validation before a CI round-trip: binding counts per layer, out-of-range positions, undefined `&labels`, bad keycodes, arity, braces. It also reads `build.yaml` and flags halves built from different keymaps, a `KEYMAP_FILE` that names nothing, a part the vendor builds that your entry leaves out, and colliding artifact names. Pass `--no-build-list` for keymaps only. |
-| `python3 -m vilemk.webui.server` | The same viewer, but editable: design VileDances, macros, combos, modifiers and layer bindings in Vial-style panels, click keys to reassign them, save to `custom/` and `variants/`. |
+| `python3 -m vilemk.webui.server` | The same viewer, editable: design VileDances, macros, combos, modifiers and layer bindings in Vial-style panels, click keys to reassign them, save to `custom/` and `variants/`. |
 
 ### Designing a keymap: every tab in the app
 
@@ -115,24 +115,31 @@ a menu of eight tabs underneath it: **Keyboard**, **Media & system**,
 **Conditional layers**.
 
 Click a key on the board to open its editor. Whichever tab you're on, picking
-something fills that key. Instead of a key, you can open one of the tabs'
-**+ New …** buttons, which opens a creation panel above the menu; the menu
-then fills whatever field in that panel you last clicked, the same way. Only
-one thing (a key editor or a panel) is ever open at once, but nothing you
-typed is lost by switching: each kind keeps its own unsaved draft, and the tab
-you left grows a **Resume …** button until you either finish it or start a
-fresh one.
+something fills that key. The tabs' **+ New …** buttons open a creation panel
+above the menu instead, and the menu then fills whichever field in that panel
+you last clicked. Only one thing is ever open at once, a key editor or a
+panel, but switching loses nothing you typed: each kind keeps its own unsaved
+draft, and the tab you left grows a **Resume …** button until you finish it
+or start a fresh one.
 
-Six of the eight tabs work this way — they fill a field. The last two,
-**Combos** and **Conditional layers**, don't: nothing on the board can point
-at a combo or a conditional layer, so instead of picking one into a key you
-switch it on or off for the keymap you're looking at. Both kinds are covered
+Six of the eight tabs fill a field this way. **Combos** and **Conditional
+layers** don't, because nothing on the board can point at either one. You
+switch those on or off for the keymap you're looking at. Both are covered
 below.
+
+Rotary encoders are not editable in the app yet. A layer's `sensor-bindings`
+is a separate property from its key `bindings`, and the knob has no key
+position on the board to click, so the editor never sees it. Encoder bindings
+are still checked by `make check`, which validates their keycodes, and saving a
+variant carries the base keymap's `sensor-bindings` through as they are. To
+change one, edit the keymap by hand; see the Encoder recipe in
+[docs/recipes.md](docs/recipes.md). What it would take to build is written up
+in [docs/todo.md](docs/todo.md).
 
 #### Keyboard
 
 The plain 104-key ANSI layout. Click a key on the board to open its editor,
-then click a key on this tab: that assigns the keycode straight away, no
+then click a key on this tab: that assigns the keycode straight away, with no
 separate confirm step. Typing a binding by hand into the key editor's own
 field still needs **Apply**.
 
@@ -144,7 +151,7 @@ Everything ZMK can send that a keyboard has no keycap for, in seven groups:
 
 | group | examples | what the board needs |
 |---|---|---|
-| Media and consumer | volume, play/pause, brightness | nothing — every board sends these |
+| Media and consumer | volume, play/pause, brightness | nothing; every board sends these |
 | Mouse | left/right/middle click, pointer movement, scroll | `CONFIG_ZMK_POINTING` |
 | Bluetooth and output | profile select, clear, USB/BLE output | a wireless board |
 | Lighting | underglow and backlight on/off, brightness, effect | the LEDs, plus the matching Kconfig |
@@ -153,25 +160,24 @@ Everything ZMK can send that a keyboard has no keycap for, in seven groups:
 | Sticky and locked keys | one-shot (`&sk`) and latched (`&kt`) over the eight modifiers | nothing |
 
 Each group names what has to be true of the board before its buttons do
-anything real — a binding whose feature the firmware was never built with
-doesn't misbehave, it fails to compile. Saving a variant adds whatever
-`#include` lines those bindings need, and says so in the save message; you
-never add them by hand.
+anything. A binding whose feature the firmware was never built with fails to
+compile rather than misbehaving. Saving a variant adds whatever `#include`
+lines those bindings need and says so in the save message; you never add them
+by hand.
 
-This tab saves nothing itself. There's no record and no card — it's a picker,
-same as Keyboard.
+This tab saves nothing. No record, no card, just a picker like Keyboard.
 
 <img src=".github/images/tab-media-system.png" width="560" alt="The Media & system tab's picker: seven labelled groups of buttons, from media codes to sticky modifiers">
 
-#### VileDance — Vial-style tap dances
+#### VileDance: Vial-style tap dances
 
 Vial, the QMK-world editor this project takes its name from, has a
-**TapDance** key: one key position, up to four different outputs depending on
-how you hit it — a tap, a hold, a double tap, or a double tap where the
-second press is held. ZMK has nothing that does all four in one behavior;
-getting a hold *and* a double-tap out of a single key means nesting a
-hold-tap inside a tap-dance. A **VileDance** is that composition, built for
-you from four fields:
+**TapDance** key: one key position, up to four outputs depending on how you
+hit it (a tap, a hold, a double tap, or a double tap where the second press is
+held). ZMK has nothing that does all four in one behavior; getting a hold
+*and* a double-tap out of a single key means nesting a hold-tap inside a
+tap-dance. A **VileDance** is that composition, built for you from four
+fields:
 
 | slot | fires on |
 |---|---|
@@ -180,33 +186,31 @@ you from four fields:
 | on double tap | two presses within the tapping term |
 | on tap + hold | the second press held down |
 
-Fill only **on tap** and you get a plain key — no extra devicetree at all.
-Add **on hold** and it becomes one hold-tap behavior. Add **on double tap**
-(and optionally **on tap + hold**) and it becomes a tap-dance holding one or
-two hold-taps. A hold slot has to be a behavior that takes exactly one
-parameter — `&kp`, `&mo`, `&sk` — not something that takes none.
+Fill only **on tap** and you get a plain key, with no extra devicetree. Add
+**on hold** and it becomes one hold-tap behavior. Add **on double tap** (and
+optionally **on tap + hold**) and it becomes a tap-dance holding one or two
+hold-taps. A hold slot has to be a behavior that takes exactly one parameter
+(`&kp`, `&mo`, `&sk`), not one that takes none.
 
-Two settings shape the timing: **tapping term** (how long a hold has to last,
-and how much time a second tap has to land in) and **flavor**, which decides
-how the hold-tap resolves an interrupting keystroke. The tap/hold pair keeps
-whatever flavor you set; the double-tap/tap-hold pair always resolves fast
-(`balanced`) regardless, because by the second press you've already committed
-to something other than plain typing — a layer-hold there should engage the
-instant the next key lands, not wait out a second tapping term. Because a
-tap-dance's own term runs before the nested hold-tap's does, a plain hold on
-this key lands at roughly *twice* the tapping term you set — worth knowing
-before you tune it down.
+Two settings shape the timing. **Tapping term** sets how long a hold has to
+last and how much time a second tap has to land in. **Flavor** decides how the
+hold-tap resolves an interrupting keystroke. The tap/hold pair keeps whatever
+flavor you set; the double-tap/tap-hold pair always resolves fast
+(`balanced`), because by the second press you have already committed to
+something other than plain typing, and a layer-hold there should engage the
+instant the next key lands. When tuning, note that a tap-dance's own term runs
+before the nested hold-tap's, so a plain hold on this key lands at roughly
+*twice* the tapping term you set.
 
-A VileDance can't hold another VileDance in one of its own four slots — a
-tap-dance inside a tap-dance is a keyboard nobody could predict the timing
-of — but it can hold a **macro** in the double-tap or tap-hold slot. "Double
-tap to type my email" is exactly the kind of thing a macro slot is for.
+A VileDance can't hold another VileDance in one of its four slots (a tap-dance
+inside a tap-dance has timing nobody could predict), but it can hold a
+**macro** in the double-tap or tap-hold slot. "Double tap to type my email" is
+what that slot is for.
 
-A saved VileDance is a live reference, not a copy: bind it to as many keys as
-you like, and editing the record later changes every one of them the next
-time you save a variant. The board tile for a key bound to one shows the
-resolved tap with a small hint for the hold in the corner, rather than the
-raw generated label.
+A saved VileDance is a live reference: bind it to as many keys as you like,
+and editing the record later changes every one of them the next time you save
+a variant. The board tile for a key bound to one shows the resolved tap with a
+small hint for the hold in the corner, rather than the raw generated label.
 
 <img src=".github/images/tab-viledance.png" width="380" alt="The VileDance panel: Name, four slots, tapping term and flavor, over Save/Devicetree/Close/Delete">
 
@@ -217,7 +221,7 @@ step:
 
 | step | does |
 |---|---|
-| text | types the string you enter — the reason this tab exists; one field for `someone@example.com`, not nineteen individual key steps |
+| text | types the string you enter: one field for `someone@example.com` instead of nineteen key steps |
 | tap | presses and releases one binding |
 | press | holds a binding down across the steps that follow |
 | release | lets a held binding go |
@@ -226,13 +230,12 @@ step:
 
 Add steps with the buttons at the bottom of the panel, reorder two with the
 ↑/↓ next to each row, remove one with ✕. A text step only understands what a
-keyboard can actually type — letters, digits, the shifted symbols, space, tab,
-newline; anything else (accented letters, emoji) is refused rather than
-silently dropped, since there's no key position for it to send. There's also
-a hard ceiling on how much one macro can queue at once (ZMK's own
-`CONFIG_ZMK_BEHAVIORS_QUEUE_SIZE`, 64 by default) — a macro over that limit is
-refused at save time rather than failing partway through on the actual
-keyboard.
+keyboard can actually type (letters, digits, the shifted symbols, space, tab,
+newline). Anything else, such as accented letters or emoji, is refused rather
+than silently dropped, since there is no key position for it to send. One
+macro can also only queue so much at once, capped by ZMK's own
+`CONFIG_ZMK_BEHAVIORS_QUEUE_SIZE` (64 by default). A macro over that limit is
+refused at save time rather than failing partway through on the keyboard.
 
 A macro can't hold itself as one of its own steps, but it can hold another
 saved macro, and can be the target of a VileDance slot or a combo's output.
@@ -242,40 +245,39 @@ saved macro, and can be the target of a VileDance slot or a combo's output.
 #### Modifiers
 
 A chain of up to three [ZMK modifier
-functions](https://zmk.dev/docs/keymaps/modifiers) — shift, control, alt, gui,
-each left or right — wrapped around a keycode, e.g. ctrl+shift+A. Click up to
-three of the eight modifier buttons in the panel (**remove last** / **clear**
-to walk them back), then use the menu below to fill **Parameter** with the
-key they wrap — a plain key, or another saved modifier, nested inside this
-one's innermost slot.
+functions](https://zmk.dev/docs/keymaps/modifiers), shift, control, alt or
+gui, each left or right, wrapped around a keycode. For example ctrl+shift+A.
+Click up to three of the eight modifier buttons in the panel (**remove last**
+and **clear** walk them back), then use the menu below to fill **Parameter**
+with the key they wrap: a plain key, or another saved modifier nested inside
+this one's innermost slot.
 
 Unlike a VileDance, a modifier's resolved text is baked in wherever you pick
-it — there's no reference back to the saved record, because a modifier chain
-isn't a devicetree behavior, just ZMK preprocessor syntax. Editing a saved
-modifier later doesn't change a key that already picked it; re-pick it to
+it. There is no reference back to the saved record, because a modifier chain
+is ZMK preprocessor syntax rather than a devicetree behavior. Editing a saved
+modifier later leaves a key that already picked it alone; re-pick it to
 propagate the change.
 
 <img src=".github/images/tab-modifiers.png" width="560" alt="The Modifiers panel: a saved ctrl+shift+F10 chain, the eight modifier buttons, and the resolved Parameter">
 
 #### Layers
 
-Layer switching in all five of ZMK's shapes, as ad-hoc one-click rows at the
-top of the tab — no saving needed, since a layer number is the whole story
-for four of them:
+Layer switching in all five of ZMK's shapes, as one-click rows at the top of
+the tab. Four of them need no saving, since a layer number is the whole story:
 
 | row | behavior | what it does |
 |---|---|---|
 | Hold | `&mo` | layer on while held, off on release |
 | Tap key / hold layer | `&lt` | tap for a key, hold for the layer |
-| Sticky | `&sl` | one shot — on for the next key press only |
+| Sticky | `&sl` | one shot, on for the next key press only |
 | Toggle | `&tog` | on until the same key is pressed again |
 | Switch to | `&to` | switches to this layer and turns every other one off |
 
-**Tap key / hold layer** is the one row worth naming and saving: give it a
+**Tap key / hold layer** is the one row worth naming and saving. Give it a
 tapping term or a flavor and it becomes its own generated hold-tap, with the
-same live-reference behavior a VileDance has — a saved card you can bind to
-several keys and edit in one place. Leave both blank and it's the same plain
-`&lt` the ad-hoc row builds for free.
+same live-reference behavior a VileDance has: a saved card you can bind to
+several keys and edit in one place. Leave both blank and it builds the same
+plain `&lt` the ad-hoc row gives you for free.
 
 The Layers tab is also where you add a layer to the keyboard: a **+ layer**
 button next to the layer tabs above the board, up to ZMK's own 32-layer cap.
@@ -287,28 +289,27 @@ you assign something into it; nothing is written until you save a variant.
 #### Combos and Conditional layers
 
 The two board-wide tabs. A **combo** fires a binding when two or more keys on
-the board are pressed together — open its panel and click the keys on the
-board above to build the chord, same board, no separate picker. A
-**conditional layer** turns a layer on automatically while two or more other
-layers are held together (the common case: hold layer 1 and layer 2, get
-layer 3).
+the board are pressed together. Open its panel and click the keys on the board
+above to build the chord, same board, no separate picker. A **conditional
+layer** turns a layer on automatically while two or more other layers are held
+together; the common case is hold layer 1 and layer 2, get layer 3.
 
 Neither goes on a key, so neither can be picked into a field. What you decide
-instead is whether *this keymap* gets it: each row has an On/Off switch, and
-it's per keymap file — the same combo can be on for one variant and off for
-another. A newly created one is switched on only for the keymap you designed
-it against; flip it on for others yourself.
+instead is whether *this keymap* gets it. Each row has an On/Off switch, per
+keymap file, so the same combo can be on for one variant and off for another.
+A newly created one is switched on only for the keymap you designed it
+against; flip it on for others yourself.
 
 <img src=".github/images/tab-combos.png" width="380" alt="The Combos panel: a saved chord's Name, Keys, Output key and Timeout"> <img src=".github/images/tab-conditional-layers.png" width="380" alt="The Conditional layers panel: a saved tri-layer rule's Name, If layers and Then layer">
 
 #### Saving
 
 Every design above is written to `custom/` as you work, independent of any
-keymap. Nothing reaches a keymap file until you save a variant — see ["Save
-your work as a variant and hand it
+keymap. Nothing reaches a keymap file until you save a variant, covered in
+["Save your work as a variant and hand it
 back"](#working-in-tandem-with-the-zmk-config-repo) above. Only the generated
 behaviors your keys, VileDances and combos actually reference are written;
-anything designed but never bound stays out of the file entirely.
+anything designed but never bound stays out of the file.
 
 ### make
 
@@ -360,8 +361,8 @@ and a `shield:` or `snippet:` survives. It also replaces everything else the
 repo built. To keep building the original keymap too, merge by hand using the
 rest of this section, giving each entry an `artifact-name:`.
 
-The rest of this section explains what that generated file does for you, and
-what you need to know when you write one yourself.
+The rest of this section covers what that file does, and what to know when
+writing one by hand.
 
 Nothing in `variants/` is ever built. The config repo's `build.yaml` drives
 GitHub Actions, and ZMK picks a keymap by name: for each entry it looks in
@@ -445,16 +446,15 @@ module is a separate part the build has to be told about, on the line for the
 half it is plugged into. The same keyboard is often sold in several versions
 (with a screen and without, one encoder or two), all built from one set of
 files by the same vendor. So there is no single correct build list the CLI
-could have written for you. There is the vendor's list, describing the
-versions they sell, and there is yours, describing the one on your desk.
-Reconciling the two is a step you do by hand, once, per keyboard.
+could have written for you: there is the vendor's list, describing the
+versions they sell, and yours, describing the one on your desk. Reconciling
+the two is a step you do by hand, once, per keyboard.
 
 Skip it and the build either comes back missing a feature, or fails with a
 compiler error that says nothing about the missing line.
 
 **Where to look.** The vendor's own list ships with the keyboard's code,
-which the CLI downloaded into the config repo when you added the keyboard.
-Reading in there is normal even though nothing in it is yours to change. In
+which the CLI downloaded into the config repo when you added the keyboard. In
 the config repo, open:
 
 ```
@@ -462,11 +462,10 @@ the config repo, open:
 ```
 
 `<keyboard-module>` is the folder named after your keyboard; for an Eyelash
-Sofle, `.zmk/modules/zmk-eyelash-sofle`. Nothing under `.zmk/` is yours: it
-is a downloaded copy. Read it, never edit it, because the next fetch
-overwrites it. If the folder is not there yet, the same file is on the
-keyboard's GitHub page, at the top level of the repository `config/west.yml`
-names.
+Sofle, `.zmk/modules/zmk-eyelash-sofle`. Nothing under `.zmk/` is yours, it is
+a downloaded copy, so read it and never edit it: the next fetch overwrites it.
+If the folder is not there yet, the same file is on the keyboard's GitHub
+page, at the top level of the repository `config/west.yml` names.
 
 Put that file beside your own `config/build.yaml` and compare them entry by
 entry. For each half, the vendor's file may carry lines yours does not:
@@ -500,8 +499,8 @@ switches that feature on for everyone, down in the keyboard's own settings.
 The build then goes looking for hardware that is not there and fails. You
 have to switch it back off.
 
-You do that without touching the vendor's files. Make a file in the config
-repo's `config/` directory named after the half it applies to
+Do it without touching the vendor's files. Make a file in the config repo's
+`config/` directory named after the half it applies to
 (`config/<board>.conf`, so `config/eyelash_sofle_left.conf` for an Eyelash
 Sofle's left side) holding the one line that turns the feature off:
 
@@ -509,9 +508,9 @@ Sofle's left side) holding the one line that turns the feature off:
 CONFIG_ZMK_DISPLAY=n
 ```
 
-The file is added on top of the vendor's settings, not in place of them: only
-what you write here changes, and everything else the keyboard needs carries
-on untouched. The file is yours, the CLI never touches it, and it survives
+The file is added on top of the vendor's settings rather than replacing them:
+only what you write here changes, and everything else the keyboard needs
+carries on untouched. It is yours. The CLI never touches it, and it survives
 every `zmk keyboard add` from here on.
 
 The mirror image is yours to handle too: a part you added that the vendor
@@ -522,8 +521,8 @@ one it looks for: the two halves naming different keymaps, a `KEYMAP_FILE`
 that points at nothing, a vendor `shield:` your entry left out with no
 `.conf` line switching the matching feature off, and two entries whose
 `.uf2` files collide. It compares your build list against the vendor's own,
-in the CLI cache, and against what is actually in `config/`. It never
-writes: it prints the line to add, and you edit and push.
+in the CLI cache, and against what is actually in `config/`. It never writes.
+It prints the line to add, and you edit and push.
 
 It cannot check everything. A `shield:` the vendor never listed, a part they
 list under a name that looks nothing like a display, or a keyboard with no
