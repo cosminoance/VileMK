@@ -1016,6 +1016,16 @@ FEATURE_FLAGS = (
 STUDIO_SNIPPET = "studio-rpc-usb-uart"
 STUDIO_FLAG = "-DCONFIG_ZMK_STUDIO=y"
 
+# ZMK's own shield for wiping the settings partition. A Studio session writes
+# edited key positions there, and those win over the compiled keymap on every
+# boot - so a keyboard that has been touched by Studio can ignore the keymap you
+# flash, for those positions only, forever. Reflashing does not clear them and
+# neither does the reset button; flashing this build is the only thing that
+# does. Worth offering next to every save, because the failure is silent: the
+# keys that keep their old bindings are exactly the ones a generated behavior
+# sits on, and everything else looks right.
+RESET_SHIELD = "settings_reset"
+
 _COMMENT_RE = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 
 
@@ -1064,6 +1074,35 @@ def _entries_for(keyboard: str, entries):
     return out
 
 
+def _reset_body(boards):
+    """The `settings_reset` entries for a build list, one per distinct board.
+
+    `settings_reset` replaces the keyboard's shield rather than joining it - the
+    build is a stub firmware that wipes the partition and stops, so it carries no
+    keymap, no feature flags and none of the original shields. Boards are what
+    vary: a split wired as two boards (`eyelash_sofle_left` / `_right`) needs one
+    uf2 per half, while a split that is one shield on two identical controllers
+    needs only one. Order follows the build list so the halves line up with the
+    firmware entries above them.
+    """
+    seen, body = set(), []
+    for b in boards:
+        if not b or b in seen:
+            continue
+        seen.add(b)
+        body.append(f"  - board: {b}\n    shield: {RESET_SHIELD}")
+    if not body:
+        return []
+    head = ("  # Wipes the keymap stored in the settings partition. ZMK Studio\n"
+            "  # writes the keys you edit there, and those override the compiled\n"
+            "  # keymap on every boot - for those positions only, which is why a\n"
+            "  # keyboard can look mostly right and have two dead keys. Flashing\n"
+            "  # normal firmware does not clear them and neither does the reset\n"
+            "  # button. Flash these to every half, then the firmware above, then\n"
+            "  # re-pair: the reset drops Bluetooth bonds too.")
+    return [head] + body
+
+
 def _with_keymap_file(cmake_args: str, keymap_rel: str) -> str:
     """Point an entry's cmake-args at our keymap, keeping every other flag."""
     flag = f'-DKEYMAP_FILE="${{GITHUB_WORKSPACE}}/{keymap_rel}"'
@@ -1076,7 +1115,7 @@ def _with_keymap_file(cmake_args: str, keymap_rel: str) -> str:
 
 
 def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
-                   keymap_text: str = ""):
+                   keymap_text: str = "", reset: bool = False):
     """-> (build.yaml text, warnings) for one keyboard and one keymap.
 
     Reads the config repo, so the caller must already be `chdir`-ed into it -
@@ -1085,6 +1124,11 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
 
     `keymap_text` is the keymap the entries will build: the feature-gated
     behaviors it binds decide which `FEATURE_FLAGS` the entries carry.
+
+    `reset` appends a `settings_reset` entry per board (`_reset_body()`). It is
+    off by default because it doubles the artifacts, and on by default in the
+    page for a keymap that binds `&studio_unlock` - the keyboards that can end up
+    with a stored keymap overriding this one are exactly those.
     """
     keymap_rel = f"config/{keymap_name}"
     warnings, source = [], ""
@@ -1101,11 +1145,26 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
     own = keymap.find_build_yaml()
     picked = (_entries_for(keyboard, keymap.parse_build_yaml(keymap.read_text(own)))
               if own else [])
+    # A `settings_reset` entry is not a firmware entry: it builds a stub that
+    # wipes the partition, and stamping KEYMAP_FILE or a feature flag onto it
+    # would be wrong. Drop them here and let `_reset_body()` write clean ones,
+    # which also keeps the output idempotent - saving a variant from a repo whose
+    # build list already carries them must not duplicate them. The caller's
+    # `reset` still decides: the box in the page is an explicit answer, so
+    # unticking it drops entries the source had, and says so.
+    had_reset = any(RESET_SHIELD in e.shields for e in picked)
+    if had_reset:
+        picked = [e for e in picked if RESET_SHIELD not in e.shields]
+        if not reset:
+            warnings.append(
+                f"the source build list has `shield: {RESET_SHIELD}` entries and "
+                "this one does not - tick `include reset` to keep them")
     if picked:
         source = f"the repo's own {own}"
     else:
         vendor = [e for e in keymap.vendor_build_entries(zmk_dir)
-                  if not e.get("snippet") and not e.get("artifact-name")]
+                  if not e.get("snippet") and not e.get("artifact-name")
+                  and RESET_SHIELD not in e.get("shield", "")]
         picked = _entries_for(keyboard, vendor)
         if picked:
             source = "the vendor's build list in the ZMK cache"
@@ -1127,6 +1186,8 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
             body.append(f"    snippet: {STUDIO_SNIPPET}")
         args = _add_flags("", feature_flags + ([STUDIO_FLAG] if studio else []))
         body.append(f"    cmake-args: {_with_keymap_file(args, keymap_rel)}")
+        if reset:
+            body += _reset_body([keyboard])
         return _build_yaml_text(keyboard, keymap_name, head, body), warnings
 
     seen, body = set(), []
@@ -1154,6 +1215,15 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
         if block not in seen:            # the same half twice is one entry
             seen.add(block)
             body.append(block)
+
+    if reset:
+        added = _reset_body([e.board for e in picked])
+        body += added
+        if added:
+            warnings.append(
+                f"the build list carries a `shield: {RESET_SHIELD}` entry per board - "
+                "flash those first to wipe a keymap ZMK Studio stored in flash, then "
+                "the firmware, then re-pair")
 
     head = (f"# Entries taken from {source},\n"
             "# with the KEYMAP_FILE changed"
@@ -1205,12 +1275,16 @@ def delete_variant(name: str) -> bool:
     return gone
 
 
-def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk"):
+def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk",
+                  reset: bool = False):
     """Write `variants/<name>/` - the keymap, and the build list that builds it.
 
     -> (keymap path, build.yaml path or "", warnings). The build list is skipped
     only when we were not told which keyboard this is; the keymap is always
     written, since it is the thing the user asked for.
+
+    `reset` adds the `settings_reset` entries to that build list - see
+    `build_yaml_for()`.
     """
     p = variant_path(name)
     os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -1230,7 +1304,7 @@ def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk
     build_path = ""
     if keyboard:
         yaml_text, yaml_warnings = build_yaml_for(
-            keyboard, os.path.basename(p), zmk_dir, keymap_text=text)
+            keyboard, os.path.basename(p), zmk_dir, keymap_text=text, reset=reset)
         build_path = os.path.join(os.path.dirname(p), "build.yaml")
         with open(build_path, "w", encoding="utf-8") as fh:
             fh.write(yaml_text)

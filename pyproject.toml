@@ -29,8 +29,18 @@ build-backend = "setuptools.build_meta"
 packages = ["vilemk", "vilemk.webui"]
 
 [tool.setuptools.package-data]
-# The page is a real .html file, not a Python string - it has to ship.
-"vilemk.webui" = ["template.html"]
+# The page is real .html/.css/.js files and two PNGs, not Python strings - they
+# all have to ship. `template.html` is only the shell; `build.template()` expands
+# its `<!--#include ...-->` directives from `page/`.
+#
+# setuptools' `include-package-data` defaults to true for pyproject.toml
+# projects, so these globs are belt-and-braces rather than load-bearing: a wheel
+# built from a clean tree carries `page/` and `assets/` either way (measured,
+# both inside and outside a git checkout). They are listed anyway because the
+# failure mode is quiet - a missing `page/` file emits a page with an empty
+# <style> and an empty <script> rather than raising, and `build_html()` calls
+# `_data_uri()` unconditionally for the favicon and the logo.
+"vilemk.webui" = ["template.html", "page/*.css", "page/*.js", "assets/*.png"]
 
 [tool.ruff]
 target-version = "py39"

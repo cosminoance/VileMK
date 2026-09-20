@@ -1,10 +1,24 @@
 """Fill `template.html` with one keymap payload, and write it out.
 
-The template is a plain HTML file, not a Python string: it is edited, linted and
-diffed as HTML. This module is the only seam between it and the data - six
-placeholders, substituted once, no template engine. It is read from disk on
-every call, so editing `template.html` shows up on the next page load without
-restarting the server.
+The page is plain HTML, CSS and JavaScript on disk, not Python strings: it is
+edited, linted and diffed as what it is. `template.html` is the shell (head,
+body markup, the six placeholders) and `page/` holds the sixteen files its
+`<!--#include name-->` directives pull in, concatenated into the page's one
+<style> and its one <script>.
+
+This module is the only seam between that and the data. Two passes, in order:
+expand the includes, then substitute the six placeholders. No template engine
+beyond those twelve lines, and no bundler - the output has to be one
+self-contained file (see `_data_uri()`), so the parts cannot be separate files
+at runtime in either emitter.
+
+Everything is read from disk on every call, so editing `template.html` or any
+part shows up on the next page load without restarting the server.
+
+The include list in `template.html` is the concatenation order, and the parts
+are one classic script sharing one scope. Top-level `const` does not hoist, so
+reordering that list is the one edit that breaks the page silently. See
+`docs/ui-split.md`.
 
 The page this writes never writes back - it is a reader. For the editable
 version, see `vilemk.webui.server`.
@@ -25,18 +39,38 @@ import base64
 import html
 import json
 import os
+import re
 import sys
 
 from .. import keymap, keypos
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "template.html")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+ASSETS_DIR = os.path.join(_HERE, "assets")
+PAGE_DIR = os.path.join(_HERE, "page")
+TEMPLATE_PATH = os.path.join(_HERE, "template.html")
+
+# `<!--#include name.css-->` on a line of its own, inside the page's one <style>
+# or its one <script>. The name pattern has no "/" in it, so a directive cannot
+# climb out of `page/`.
+INCLUDE_RE = re.compile(r"^[ \t]*<!--#include ([\w.-]+)-->[ \t]*\r?\n", re.M)
+
+
+def _part(match: "re.Match") -> str:
+    """One `page/` file, under a banner naming it.
+
+    `/* name */` is a comment in CSS and in JavaScript both, which is what lets
+    the same directive work in either block - and what makes a line in an error
+    trace findable again, since the assembled document matches no file on disk.
+    """
+    name = match.group(1)
+    with open(os.path.join(PAGE_DIR, name), encoding="utf-8") as fh:
+        return "/* %s */\n%s" % (name, fh.read())
 
 
 def template() -> str:
-    """The raw page, placeholders unfilled."""
+    """The raw page, includes expanded, placeholders unfilled."""
     with open(TEMPLATE_PATH, encoding="utf-8") as fh:
-        return fh.read()
+        return INCLUDE_RE.sub(_part, fh.read())
 
 
 def _data_uri(asset_name: str) -> str:
