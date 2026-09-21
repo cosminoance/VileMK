@@ -4,6 +4,7 @@ import {
 } from "react";
 
 import { BLANK, type Mode } from "../lib/drafts";
+import type { Importing } from "../lib/transfer";
 
 // ---------------------------------------------------------------- the state
 //
@@ -31,6 +32,8 @@ export interface State {
   /** `data.custom`, kept separate because every write returns a fresh one. */
   store: any;
   filter: string;
+  /** Sidebar open. Collapsing it gives the board the whole width. */
+  rail: boolean;
 
   id: string | null;
   layer: number;
@@ -52,18 +55,23 @@ export interface State {
 
   activeField: string | null;
   keyVal: string;
+
+  /** The import dialog, from the file being read to the checks on what it wrote. */
+  imp: Importing | null;
 }
 
 export const initialState = (data: any): State => ({
   data,
   store: data.custom || {viledance:[], combo:[], modifier:[], layer:[], macro:[]},
   filter: "",
+  rail: true,
   id: (data.keymaps[0] || {}).id || null,
   layer: 0, layout: 0, base: "", nums: true, hot: null,
   emode: null, drafts: {}, assign: {}, msg: null, dts: null,
   editing: null, picker: true, ptab: "keyboard",
   newLayers: {}, reset: null,
   activeField: null, keyVal: "",
+  imp: null,
 });
 
 export const LIVE = (s: State): boolean => !!s.data.live;
@@ -73,6 +81,7 @@ export type Action =
   | { t: "data"; data: any }
   | { t: "store"; store: any }
   | { t: "filter"; v: string }
+  | { t: "rail"; on: boolean }
   | { t: "select"; id: string | null }
   | { t: "layer"; n: number }
   | { t: "layout"; n: number }
@@ -97,13 +106,17 @@ export type Action =
   | { t: "addLayer"; kmId: string; name: string; at: number }
   | { t: "savedVariant"; data: any; store: any; id: string | null;
       kmId: string; msg: Msg | null }
-  | { t: "deletedVariant"; data: any; store: any; kmId: string; msg: Msg | null };
+  | { t: "deletedVariant"; data: any; store: any; kmId: string; msg: Msg | null }
+  | { t: "imp"; imp: Importing | null }
+  | { t: "impPatch"; patch: Partial<Importing> }
+  | { t: "imported"; data: any; store: any; id: string | null; msg: Msg | null };
 
 export function reducer(s: State, a: Action): State {
   switch (a.t) {
     case "data": return { ...s, data: a.data };
     case "store": return { ...s, store: a.store };
     case "filter": return { ...s, filter: a.v };
+    case "rail": return { ...s, rail: a.on };
 
     case "select":
       return { ...s, id: a.id, layer: 0, layout: 0, hot: null };
@@ -188,6 +201,15 @@ export function reducer(s: State, a: Action): State {
       return { ...s, data: a.data, store: a.store, msg: a.msg,
                assign: {}, newLayers: { ...s.newLayers, [a.kmId]: [] },
                ...(a.id ? { id: a.id, layer: 0 } : {}) };
+
+    case "imp": return { ...s, imp: a.imp };
+
+    case "impPatch":
+      return s.imp ? { ...s, imp: { ...s.imp, ...a.patch } } : s;
+
+    case "imported":
+      return { ...s, data: a.data, store: a.store, msg: a.msg,
+               assign: {}, ...(a.id ? { id: a.id, layer: 0, layout: 0 } : {}) };
 
     case "deletedVariant": {
       const newLayers = { ...s.newLayers };

@@ -5,6 +5,7 @@
 import type { Dispatch } from "react";
 
 import { api } from "../lib/api";
+import { readTextFile, saveFile } from "../lib/download";
 import { BOARD_TABS, KIND_OF, recordOf, type Mode } from "../lib/drafts";
 import { scopeOf, scopeOn, slugify, byId } from "../lib/keymaps";
 import type { Action, State } from "./store";
@@ -129,4 +130,53 @@ export async function deleteVariant(s: State, d: D, km: any) {
         store: fresh.custom || r.custom || s.store, kmId: km.id,
         msg: { text: `deleted variants/${km.name}/` } });
   } catch (e) { d({ t: "msg", msg: bad(e) }); }
+}
+
+// ------------------------------------------------------------ share and import
+
+export async function exportVariant(d: D, km: any) {
+  try {
+    const r = await api("GET", `/api/export/${encodeURIComponent(km.name)}`);
+    const ok = await saveFile(r.filename,
+      new Blob([r.text], { type: "text/plain;charset=utf-8" }),
+      [{ description: "ZMK keymap", accept: { "text/plain": [".keymap"] } }]);
+    if (ok) d({ t: "msg", msg: { text: `exported ${r.filename}` } });
+  } catch (e) { d({ t: "msg", msg: bad(e) }); }
+}
+
+export async function openImport(d: D, file: File) {
+  try {
+    const text = await readTextFile(file);
+    const r = await api("POST", "/api/import/inspect",
+                        { text, filename: file.name });
+    d({ t: "imp", imp: {
+      filename: file.name, text,
+      board: r.board, known: !!r.known,
+      name: r.name, taken: !!r.taken,
+      records: r.records || [],
+      choices: {}, renames: {}, busy: false, error: null, result: null,
+    } });
+  } catch (e) { d({ t: "msg", msg: bad(e) }); }
+}
+
+export async function runImport(s: State, d: D) {
+  const imp = s.imp;
+  if (!imp) return;
+  d({ t: "impPatch", patch: { busy: true, error: null } });
+  try {
+    const r = await api("POST", "/api/import", {
+      name: imp.name, text: imp.text, filename: imp.filename,
+      choices: imp.choices, renames: imp.renames,
+    });
+    const fresh = await api("GET", "/api/state");
+    const fn = r.wrote.split("/").pop();
+    const created = fresh.keymaps.find(
+      (k: any) => k.kind === "variant" && k.path.split("/").pop() === fn);
+    d({ t: "impPatch", patch: { busy: false, result: r } });
+    d({ t: "imported", data: fresh, store: fresh.custom || r.custom || s.store,
+        id: created ? created.id : null,
+        msg: { text: `imported into ${r.folder || r.wrote}` } });
+  } catch (e) {
+    d({ t: "impPatch", patch: { busy: false, error: (e as Error).message } });
+  }
 }

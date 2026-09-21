@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getState } from "./lib/api";
 import { KeymapView } from "./components/KeymapView";
 import { Sidebar } from "./components/Sidebar";
+import { ImportDialog } from "./components/Transfer";
 import { LIVE, StoreProvider, useStore } from "./state/store";
 import logo from "../../vilemk/webui/assets/logo.png";
 
@@ -16,10 +17,11 @@ function Shell() {
         {LIVE(s) ? "live · saving to custom/" : "read-only"}
       </span>
     </header>
-    <div className="wrap">
+    <div className={s.rail ? "wrap" : "wrap closed"}>
       <Sidebar />
       <KeymapView />
     </div>
+    <ImportDialog />
   </>;
 }
 

@@ -3,6 +3,8 @@
 // board coordinates that point is `((rx-x0)*S, (ry-y0)*S)`, which is what
 // `rotate(deg cx cy)` takes.
 
+import type { RefObject } from "react";
+
 import { resolveBinding } from "../lib/labels";
 
 const S = 0.50;   // keyboard units to pixels
@@ -54,6 +56,29 @@ function clip(text: string, innerW: number, size: number): string {
   return text.slice(0, Math.max(1, n)) + "…";
 }
 
+// The extent of the board in keyboard units. A rotated key sticks out past its
+// own origin, so the box is the four corners of every key *after* rotation -
+// taking the min/max of the origins alone cuts the thumb clusters off.
+function bounds(keys: number[][]) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [kw, kh, kx, ky, rot, rx, ry] of keys) {
+    const a = ((rot || 0) / 100) * (Math.PI / 180);
+    const cos = Math.cos(a), sin = Math.sin(a);
+    const corners = [[kx, ky], [kx + kw, ky], [kx, ky + kh], [kx + kw, ky + kh]];
+    for (const [px, py] of corners) {
+      let X = px, Y = py;
+      if (a) {
+        const dx = px - rx, dy = py - ry;
+        X = rx + dx * cos - dy * sin;
+        Y = ry + dx * sin + dy * cos;
+      }
+      x0 = Math.min(x0, X); x1 = Math.max(x1, X);
+      y0 = Math.min(y0, Y); y1 = Math.max(y1, Y);
+    }
+  }
+  return { x0, y0, w: x1 - x0, h: y1 - y0 };
+}
+
 export interface BoardProps {
   km: any;
   lay: any;
@@ -68,19 +93,19 @@ export interface BoardProps {
   editing: number | null;
   /** Null when the page is read-only: no key is clickable. */
   onKey: ((pos: number) => void) | null;
+  /** Held by the view above, which exports the board as an image. */
+  svgRef?: RefObject<SVGSVGElement | null>;
 }
 
 export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
-                        sel, editing, onKey }: BoardProps) {
+                        sel, editing, onKey, svgRef }: BoardProps) {
   const keys: number[][] = lay.keys;
-  const xs = keys.map((k) => k[2]), ys = keys.map((k) => k[3]);
-  const w = Math.max(...keys.map((k) => k[2] + k[0])) - Math.min(...xs);
-  const h = Math.max(...keys.map((k) => k[3] + k[1])) - Math.min(...ys);
-  const x0 = Math.min(...xs), y0 = Math.min(...ys);
+  const { x0, y0, w, h } = bounds(keys);
 
   return (
-    <svg className="board" width={w * S + PAD} height={h * S + PAD}
+    <svg ref={svgRef} className="board" width={w * S + PAD} height={h * S + PAD}
          viewBox={`0 0 ${w * S + PAD} ${h * S + PAD}`}>
+      <g transform={`translate(${PAD / 2} ${PAD / 2})`}>
       {keys.map((k, i) => {
         const [kw, kh, kx, ky, rot, rx, ry] = k;
         const pend = assign[i];
@@ -143,6 +168,7 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
           </g>
         );
       })}
+      </g>
     </svg>
   );
 }

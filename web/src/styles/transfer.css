@@ -1,0 +1,28 @@
+/* Export buttons, the sidebar's import target, and the import dialog. */
+aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
+.impbtn{display:block;width:100%;margin:0 0 10px;text-align:center}
+
+.modal{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.45);
+  display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;
+  overflow:auto}
+.sheet{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:18px 20px;width:min(760px,100%)}
+.sheet h2{margin:0;font-size:17px}
+.sheet .bar{margin-bottom:10px}
+
+.ilist{list-style:none;margin:12px 0;padding:0;display:flex;flex-direction:column;
+  gap:6px}
+.irow{border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.irow.clash{display:block;border-color:var(--diff);background:var(--diff-soft)}
+.irow.clash .bar{margin:0}
+.irow .nm{font-size:13px;font-weight:600}
+.irow .tgl{width:auto;padding:3px 10px}
+
+.cmp{display:flex;gap:12px;margin-top:8px}
+.cmp > div{flex:1;min-width:0}
+.cmp h4{margin:0 0 4px;font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted)}
+.cmp pre{margin:0;padding:8px;border-radius:6px;background:var(--bg);
+  border:1px solid var(--line);font-size:11px;white-space:pre-wrap;
+  word-break:break-word}

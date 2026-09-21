@@ -62,6 +62,10 @@ SECOND_ROW_FLAVOR = "balanced"
 
 BEGIN_MARK = "// BEGIN vilemk custom - generated, edits here are overwritten"
 END_MARK = "// END vilemk custom"
+# The records the block was generated from, so import can restore them. Must
+# stay on one line: `//` ends at the newline, and `/* */` is unusable because a
+# macro's `text` step can contain `*/`.
+RECORDS_MARK = "// vilemk-records: "
 
 
 # ------------------------------------------------------------------ storage
@@ -544,6 +548,97 @@ def emit_layer(rec: dict):
     return nodes, binding
 
 
+# --------------------------------------------------------- the record manifest
+# Modifiers are absent because they emit no node: they resolve to `LS(LA(A))` on
+# the key, so the keymap already carries everything it needs.
+
+def portable(rec: dict) -> dict:
+    """A record without the fields that only mean something on this machine."""
+    return {k: v for k, v in rec.items() if k not in ("kind", "scopes", "broken")}
+
+
+def manifest(viledances=(), combos=(), layers=(), macros=()) -> str:
+    """The `// vilemk-records:` line for a block built from these records."""
+    payload = {"viledance": [portable(r) for r in viledances],
+               "combo": [portable(r) for r in combos],
+               "layer": [portable(r) for r in layers],
+               "macro": [portable(r) for r in macros]}
+    return RECORDS_MARK + json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def read_manifest(text: str):
+    """The records a keymap carries -> {kind: [rec]}. Malformed reads as empty."""
+    out = {k: [] for k in DIRS}
+    i = text.find(RECORDS_MARK)
+    if i == -1:
+        return out
+    line = text[i + len(RECORDS_MARK):].split("\n", 1)[0]
+    try:
+        got = json.loads(line)
+    except ValueError:
+        return out
+    if not isinstance(got, dict):
+        return out
+    for kind in out:
+        recs = got.get(kind)
+        if not isinstance(recs, list):
+            continue
+        out[kind] = [r for r in recs if isinstance(r, dict) and slug(r.get("name", ""))]
+    return out
+
+
+def _outside_comments(text: str, fn):
+    """Apply `fn` to the parts of `text` that are not comments."""
+    out, at = [], 0
+    for m in _COMMENT_RE.finditer(text):
+        out.append(fn(text[at:m.start()]))
+        out.append(m.group(0))
+        at = m.end()
+    out.append(fn(text[at:]))
+    return "".join(out)
+
+
+def rename_refs(text: str, kind: str, old: str, new: str) -> str:
+    """Point every `&label` for one record at its renamed self, outside comments."""
+    pairs = list(zip(_defines(kind, {"name": old}), _defines(kind, {"name": new})))
+    if not pairs:
+        return text
+
+    def sub(part: str) -> str:
+        for a, b in pairs:
+            part = re.sub(r"&" + re.escape(a) + r"\b", "&" + b, part)
+        return part
+
+    return _outside_comments(text, sub)
+
+
+_SLOT_FIELDS = {"viledance": VILE_SLOTS, "layer": ("key",), "combo": ("binding",)}
+
+
+def rename_in_record(rec: dict, kind: str, target: str, old: str, new: str) -> dict:
+    """The record with its own slots pointing at a renamed record of `target` kind."""
+    pairs = list(zip(_defines(target, {"name": old}), _defines(target, {"name": new})))
+    if not pairs:
+        return rec
+
+    def sub(text):
+        if not isinstance(text, str):
+            return text
+        for a, b in pairs:
+            text = re.sub(r"&" + re.escape(a) + r"\b", "&" + b, text)
+        return text
+
+    out = dict(rec)
+    for field in _SLOT_FIELDS.get(kind, ()):
+        if field in out:
+            out[field] = sub(out[field])
+    if kind == "macro":
+        out["steps"] = [{**st, "binding": sub(st.get("binding", ""))}
+                        if isinstance(st, dict) else st
+                        for st in (out.get("steps") or [])]
+    return out
+
+
 def block(viledances=(), combos=(), layers=(), macros=()) -> str:
     """The whole generated root block: only what was passed in."""
     behaviors, errors = "", []
@@ -581,7 +676,7 @@ def block(viledances=(), combos=(), layers=(), macros=()) -> str:
             errors.append(f"{rec.get('name')}: {exc}")
     if not behaviors and not macro_nodes and not combo_nodes and not cond_nodes:
         return "", errors
-    out = [BEGIN_MARK, "/ {"]
+    out = [BEGIN_MARK, manifest(viledances, combos, layers, macros), "/ {"]
     if behaviors:
         out.append("    behaviors {\n" + behaviors + "    };")
     if macro_nodes:
@@ -845,6 +940,51 @@ def _refs(kind: str, rec: dict):
     return [split_binding(t)[0].lstrip("&") for t in texts if t]
 
 
+def reachable_records(text, viledances, combos, layers, macros, scope=""):
+    """Which records a keymap uses -> (viledances, combos, layers, macros).
+
+    `text` must already have its generated block stripped, so the scan reads
+    only what the keys name.
+
+    The reachable set, not just the directly-bound one. Seeds: every label the
+    keymap names, plus the ones the combos being written name (a combo goes on
+    no key, so its output binding is nowhere in the keymap text). Then follow
+    each chosen record's own slots, because a VileDance can tap a macro and a
+    macro can tap a VileDance - one hop is not enough.
+    """
+    live_combos = [c for c in combos if scoped_on(c, scope)]
+    pool = ([("viledance", r) for r in viledances]
+            + [("macro", r) for r in macros]
+            + [("layer", r) for r in layers
+               if (r.get("mode") or "lt") != "conditional"])
+    by_label = {}
+    for kind, rec in pool:
+        for lbl in _defines(kind, rec):
+            by_label.setdefault(lbl, (kind, rec))
+
+    pending = [m.group(1) for m in _PHANDLE_RE.finditer(text)]
+    for rec in live_combos:
+        pending += _refs("combo", rec)
+    taken = set()
+    while pending:
+        hit = by_label.get(pending.pop())
+        if hit is None or id(hit[1]) in taken:
+            continue
+        taken.add(id(hit[1]))
+        pending += _refs(hit[0], hit[1])
+
+    wanted = [r for k, r in pool if k == "viledance" and id(r) in taken]
+    live_macros = [r for k, r in pool if k == "macro" and id(r) in taken]
+    # A conditional layer is bound to no key - nothing could ever reference it -
+    # so it follows the combo rule instead: written only where it is switched on
+    # for this variant. A layer-tap follows the VileDance rule, since a key does
+    # reference it (and a plain `&lt` entry emits nothing either way).
+    live_layers = [r for r in layers
+                   if (scoped_on(r, scope) if (r.get("mode") or "lt") == "conditional"
+                       else id(r) in taken)]
+    return wanted, live_combos, live_layers, live_macros
+
+
 def build_variant(base_text, expanded_layers, assignments, viledances, combos,
                   layers=(), macros=(), rows=None, new_layers=(), scope=""):
     """Base keymap + key assignments + only the custom code those keys use.
@@ -892,42 +1032,8 @@ def build_variant(base_text, expanded_layers, assignments, viledances, combos,
     # under a binding that still points at it, and the build fails on an
     # undefined node label.
     text = strip_block(text)
-    live_combos = [c for c in combos if scoped_on(c, scope)]
-
-    # The reachable set, not just the directly-bound one. Seeds: every label the
-    # finished keymap names, plus the ones the combos being written name (a combo
-    # goes on no key, so its output binding is nowhere in the keymap text). Then
-    # follow each chosen record's own slots, because a VileDance can tap a macro
-    # and a macro can tap a VileDance - one hop is not enough.
-    pool = ([("viledance", r) for r in viledances]
-            + [("macro", r) for r in macros]
-            + [("layer", r) for r in layers
-               if (r.get("mode") or "lt") != "conditional"])
-    by_label = {}
-    for kind, rec in pool:
-        for lbl in _defines(kind, rec):
-            by_label.setdefault(lbl, (kind, rec))
-
-    pending = [m.group(1) for m in _PHANDLE_RE.finditer(text)]
-    for rec in live_combos:
-        pending += _refs("combo", rec)
-    taken = set()
-    while pending:
-        hit = by_label.get(pending.pop())
-        if hit is None or id(hit[1]) in taken:
-            continue
-        taken.add(id(hit[1]))
-        pending += _refs(hit[0], hit[1])
-
-    wanted = [r for k, r in pool if k == "viledance" and id(r) in taken]
-    live_macros = [r for k, r in pool if k == "macro" and id(r) in taken]
-    # A conditional layer is bound to no key - nothing could ever reference it -
-    # so it follows the combo rule instead: written only where it is switched on
-    # for this variant. A layer-tap follows the VileDance rule, since a key does
-    # reference it (and a plain `&lt` entry emits nothing either way).
-    live_layers = [r for r in layers
-                   if (scoped_on(r, scope) if (r.get("mode") or "lt") == "conditional"
-                       else id(r) in taken)]
+    wanted, live_combos, live_layers, live_macros = reachable_records(
+        text, viledances, combos, layers, macros, scope)
 
     gen, errors = block(wanted, live_combos, live_layers, live_macros)
     if gen:
@@ -951,6 +1057,20 @@ def strip_block(text: str) -> str:
     if j == -1:
         return text[:i].rstrip() + "\n"
     return (text[:i].rstrip() + "\n" + text[j + len(END_MARK):].lstrip("\n")).rstrip() + "\n"
+
+
+def with_manifest(text, viledances, combos, layers, macros, scope=""):
+    """`text` with a manifest added to its generated block if it lacks one.
+
+    For files written before manifests existed. The records are the ones the
+    next save would write, so a store that has drifted wins over the file.
+    """
+    if RECORDS_MARK in text or BEGIN_MARK not in text:
+        return text
+    recs = reachable_records(strip_block(text), viledances, combos, layers,
+                             macros, scope)
+    at = text.find(BEGIN_MARK) + len(BEGIN_MARK)
+    return text[:at] + "\n" + manifest(*recs) + text[at:]
 
 
 def variant_slug(name: str) -> str:

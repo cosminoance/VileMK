@@ -14,11 +14,6 @@ import react from "@vitejs/plugin-react";
 // `localhost`. Setting it means the guard keeps working if either side
 // changes.
 export default defineConfig({
-  // Served under /app while the old string-rendered page keeps "/", so both
-  // run side by side during the port (react-migration.md, Phase 1). The dev
-  // server honours this too: `npm run dev` is http://localhost:5173/app/.
-  // Phase 4 flips this to "/" and deletes the old page.
-  base: "/app/",
   plugins: [react()],
   build: {
     outDir: "../vilemk/webui/dist",
@@ -28,10 +23,8 @@ export default defineConfig({
     proxy: {
       "/api": { target: "http://127.0.0.1:7879", changeOrigin: true },
     },
-    // The logo and the favicon are imported from vilemk/webui/assets/, which is
-    // outside this root. They belong to the Python package - build.py baked the
-    // same two files into the static page - so the app references them where
-    // they live rather than keeping a second copy under web/. `vite build`
+    // The logo and the favicon are imported from vilemk/webui/assets/, which
+    // is outside this root: they belong to the Python package. `vite build`
     // resolves them anyway; the dev server needs to be told they are readable.
     fs: { allow: [".."] },
   },

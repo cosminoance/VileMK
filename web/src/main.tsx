@@ -6,6 +6,7 @@ import "./styles/shell.css";
 import "./styles/board.css";
 // Last: `.k.pick` and `.k.asg` have to beat `.k.diff` and `.k.hot`.
 import "./styles/editor.css";
+import "./styles/transfer.css";
 import favicon from "../../vilemk/webui/assets/favicon.png";
 import { App } from "./App";
 

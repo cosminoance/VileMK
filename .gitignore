@@ -223,7 +223,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-keymap-ui.html
 .claude/
 custom/
 variants/

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { byId } from "../lib/keymaps";
 import { layersOf } from "../lib/layers";
@@ -9,10 +9,12 @@ import { KeyEditor } from "./KeyEditor";
 import { Menu } from "./Menu";
 import { Panel } from "./Panels";
 import { Tables } from "./Tables";
+import { ExportBar } from "./Transfer";
 import { VariantBar } from "./VariantBar";
 
 export function KeymapView() {
   const { s, d } = useStore();
+  const board = useRef<SVGSVGElement>(null);
   const km = byId(s.data.keymaps, s.id);
   if (!km) return <main><p>Pick a keyboard on the left.</p></main>;
 
@@ -90,6 +92,7 @@ export function KeymapView() {
                  onChange={(e) => d({ t: "nums", on: e.target.checked })} />
           {" "}key positions
         </label>
+        <ExportBar km={km} board={board} />
       </div>
 
       {live && <VariantBar key={km.id} km={km} />}
@@ -129,7 +132,7 @@ export function KeymapView() {
             <Board km={km} lay={lay} bindings={layer.bindings}
                    baseBindings={baseBindings} assign={s.assign[li] || {}}
                    nums={s.nums} hot={s.hot} sel={sel} editing={s.editing}
-                   onKey={onKey} />
+                   onKey={onKey} svgRef={board} />
           </>}
 
       {/* The editor area holds a key's editor, a creation panel, or nothing.

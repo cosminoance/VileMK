@@ -5,7 +5,10 @@
    rules read the same - what changes is that a background is a `fill` and a
    border is a `stroke`, and that position is an attribute rather than a rule.
    Text sizes stay in Board.tsx, which needs them for the line arithmetic. */
-.board{display:block;margin:0 0 18px}
+/* Centred, and never wider than the column: a big split board scales down
+   rather than being clipped by `main`. The intrinsic width/height attributes
+   stay the natural size, which is what the PNG export reads. */
+.board{display:block;margin:0 auto 18px;max-width:100%;height:auto}
 .k rect{fill:var(--key);stroke:var(--key-line);stroke-width:1}
 .k text{fill:var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 /* The shifted legend, printed where a real keycap prints it: above the plain
@@ -22,12 +25,20 @@
 .k.empty{opacity:.45}
 .k.compound rect{stroke-dasharray:3 2}
 .cols{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+/* `min-width:0` lets the card be narrower than the table wants to be, and
+   `overflow-x:auto` is the backstop for whatever still will not fit: without
+   the pair, a long devicetree string paints straight out of the card and under
+   the next one. */
 section.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
-  padding:10px 12px;min-width:280px;flex:1}
+  padding:10px 12px;min-width:0;flex:1 1 280px;overflow-x:auto}
 section.card h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;
   letter-spacing:.06em;color:var(--muted)}
 table{border-collapse:collapse;width:100%;font-size:12px}
-td,th{text-align:left;padding:3px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+/* A label like `&ht_tapbackspace_holdlayer2` is one unbreakable word, and it
+   alone is wider than a third of the column. Cells break inside a word rather
+   than widening the table past its card. */
+td,th{text-align:left;padding:3px 6px;border-bottom:1px solid var(--line);
+  vertical-align:top;overflow-wrap:anywhere}
 th{color:var(--muted);font-weight:500}
 tr.combo:hover{background:var(--combo-soft)}
 tr.usedby:hover{background:var(--accent-soft)}

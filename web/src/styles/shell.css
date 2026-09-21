@@ -12,6 +12,20 @@ header .meta{color:var(--muted);font-size:12px}
 .wrap{display:flex;align-items:flex-start}
 aside{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel);
   height:calc(100vh - 42px);overflow:auto;position:sticky;top:42px;padding:10px}
+.wrap.closed aside{display:none}
+/* The collapse handle, riding the sidebar's right border: a tab of the panel's
+   own surface, overlapping the border by a pixel so the two read as one piece.
+   Sticky at the same offset as the sidebar, so it stays put while the board
+   scrolls. Collapsed it is the only thing left of the panel, which is why it
+   lives outside `aside` and keeps its own border on that side. */
+.railtab{flex:none;align-self:flex-start;position:sticky;top:52px;z-index:1;
+  width:16px;height:56px;margin-left:-1px;padding:0;
+  border:1px solid var(--line);border-left-color:var(--panel);
+  border-radius:0 6px 6px 0;background:var(--panel);color:var(--muted);
+  cursor:pointer;font:14px/1 ui-sans-serif,system-ui,sans-serif}
+.railtab:hover{background:var(--accent-soft);color:var(--accent);
+  border-color:var(--accent);border-left-color:var(--accent-soft)}
+.wrap.closed .railtab{margin-left:0;border-left-color:var(--line)}
 aside input{width:100%;padding:6px 8px;margin-bottom:8px;border:1px solid var(--line);
   border-radius:6px;background:var(--bg);color:var(--ink)}
 aside .group{font-size:11px;text-transform:uppercase;letter-spacing:.06em;
@@ -22,15 +36,22 @@ aside button:hover{background:var(--bg)}
 aside button.sel{background:var(--accent-soft);color:var(--accent);font-weight:600}
 aside button small{display:block;color:var(--muted);font-weight:400;font-size:11px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-main{flex:1;min-width:0;padding:16px 20px 60px}
+/* Centred column. `min-width:0` keeps a wide child (the board, a `<pre>`) from
+   forcing the flex item wider than the viewport instead of scrolling itself. */
+main{flex:1;min-width:0;width:100%;max-width:1200px;margin:0 auto;
+  padding:16px 20px 60px}
 main.boot{padding:24px;max-width:900px}
 main.boot code{color:var(--accent)}
 main.boot .bad{color:var(--warn)}
 .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
 .bar h2{margin:0;font-size:17px}
 .bar .path{color:var(--muted);font-size:12px;font-family:ui-monospace,monospace}
+/* A `<select>` sizes itself to its longest option, and the compare-with list
+   holds absolute paths - so it is capped, and allowed to shrink inside the
+   bar, instead of setting the page's width. */
 select,.toggle{padding:5px 8px;border:1px solid var(--line);border-radius:6px;
   background:var(--panel);color:var(--ink);font:inherit}
+select{min-width:0;max-width:100%}
 label.toggle{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
 .tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px}
 .tabs button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;

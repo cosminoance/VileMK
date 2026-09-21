@@ -9,9 +9,9 @@ standard library, bound to loopback, with a handful of JSON endpoints over the
     python3 -m vilemk.webui.server --port 9000 --no-open
 
 Endpoints:
-    GET    /                      the viewer, regenerated on every load
-    GET    /app/...               the React app from `dist/` (see below)
+    GET    /...                   the app from `dist/` (see below)
     GET    /api/state             keymaps + custom items + repo info
+    GET    /api/export/<name>     one variant's keymap, records manifest embedded
     POST   /api/viledance         save one (JSON body, `name` required)
     POST   /api/macro             save one (a list of steps)
     POST   /api/combo             save one
@@ -26,12 +26,11 @@ Endpoints:
     POST   /api/variant           write variants/<name>/ (keymap + build.yaml;
                                   `reset: true` adds the settings_reset entries)
     DELETE /api/variant/<name>    remove variants/<name>/
+    POST   /api/import/inspect    read a shared keymap, report record collisions
+    POST   /api/import            restore its records, then write variants/<name>/
 
-`/` and `/app/` are two front ends over the same endpoints while the React
-port is in progress (docs/react-migration.md). `/` is the string-rendered page
-`build.py` generates; `/app/` is the built React app under `dist/`, which is
-not in the repo - `make web` writes it. When the port lands, `/app/` becomes
-`/` and everything behind the first route goes away.
+The page is the React app under `dist/`, which is not in the repo - `make web`
+writes it, and the static route says so when it is missing.
 """
 
 from __future__ import annotations
@@ -46,8 +45,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .. import custom, keymap, keypos
-from .build import build_html
+from .. import check, custom, keymap, keypos
 
 EMIT = {"viledance": custom.emit_viledance, "combo": custom.emit_combo,
         "modifier": custom.emit_modifier, "layer": custom.emit_layer,
@@ -61,7 +59,7 @@ PORT = 7879          # fixed, so the page is always at the same address
 # is therefore an ordinary state with an ordinary answer, not an error to
 # swallow - `_static()` says which command fixes it.
 DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
-APP = "/app"         # served under a prefix so the old page keeps `/`
+MAX_IMPORT = 2 << 20
 
 # `mimetypes` reads /etc/mime.types, which varies by machine and has been seen
 # to call .js `text/plain`. A module script with the wrong type is refused by
@@ -76,22 +74,16 @@ REPO, HOW, QUIET = ".", "", False
 
 
 class Args:
-    """The subset of the keymap collector's options the server needs."""
+    """The subset of the keymap collector's and checker's options the server needs."""
     def __init__(self, repo=None):
         self.zmk = ".zmk"
         self.root = []
         self.include = []
         self.all = False
         self.repo = repo
+        self.keys = None
 
 
-def page(args) -> bytes:
-    data = keymap.collect_data(args)
-    data["repo_path"] = REPO
-    data["repo_found_via"] = HOW
-    data["live"] = True
-    data["custom"] = custom.load_everything()
-    return build_html(data).encode("utf-8")
 class Handler(BaseHTTPRequestHandler):
     server_version = "vilemk"
     protocol_version = "HTTP/1.1"
@@ -135,25 +127,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._guard():
             return
-        if self.path in ("/", "/index.html"):
-            try:
-                return self._send(200, body=page(Args(REPO)), ctype="text/html; charset=utf-8")
-            except Exception as exc:  # noqa: BLE001 - show it in the browser
-                return self._send(500, body=f"<pre>{exc}</pre>".encode(),
-                                  ctype="text/html; charset=utf-8")
-        if self.path == APP or self.path.startswith(APP + "/"):
-            return self._static(self.path[len(APP):])
+        self.path = self.path.split("?", 1)[0].split("#", 1)[0]
         if self.path == "/api/state":
             data = keymap.collect_data(Args(REPO))
             data["custom"] = custom.load_everything()
             data["repo_path"] = REPO
-            # `page()` sets these three on the baked payload; the React app
-            # reads the same fields over the wire, so send them here too.
-            # `live` is what makes the write controls render at all.
             data["repo_found_via"] = HOW
+            # `live` is what makes the write controls render at all.
             data["live"] = True
             return self._send(200, data)
-        self._send(404, {"error": "not found"})
+        parts = self.path.strip("/").split("/")
+        if len(parts) == 3 and parts[:2] == ["api", "export"]:
+            return self._export(parts[2])
+        if parts and parts[0] == "api":
+            return self._send(404, {"error": "not found"})
+        return self._static(self.path)
 
     # --------------------------------------------------------------- the app
     def _static(self, rel: str):
@@ -209,6 +197,30 @@ class Handler(BaseHTTPRequestHandler):
                  if clean.startswith("assets/") else "no-store")
         self._send(200, body=body, ctype=ctype, cache=cache)
 
+    # --------------------------------------------------------------- export
+    def _export(self, name: str):
+        """One variant's keymap text, with the records it uses embedded in it."""
+        try:
+            path = custom.variant_path(name)
+        except ValueError as exc:
+            return self._send(400, {"error": str(exc)})
+        if not os.path.isfile(path):
+            path = custom.legacy_variant_path(name)
+        if not os.path.isfile(path):
+            return self._send(404, {"error": f"no variant named {name!r}"})
+        try:
+            text = open(path, encoding="utf-8").read()
+        except OSError as exc:
+            return self._send(500, {"error": str(exc)})
+
+        store = custom.load_everything()
+        text = custom.with_manifest(text, store["viledance"], store["combo"],
+                                    store["layer"], store["macro"],
+                                    scope=custom.scope_key("variant", name))
+        return self._send(200, {"name": custom.variant_slug(name),
+                                "filename": os.path.basename(path),
+                                "text": text})
+
     def do_POST(self):
         if not self._guard():
             return
@@ -245,6 +257,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/variant":
             return self._variant(rec)
+
+        if self.path == "/api/import/inspect":
+            return self._import_inspect(rec)
+
+        if self.path == "/api/import":
+            return self._import(rec)
 
         self._send(404, {"error": "not found"})
 
@@ -332,6 +350,188 @@ class Handler(BaseHTTPRequestHandler):
                                 "warnings": errors + notes,
                                 "custom": custom.load_everything()})
 
+    # --------------------------------------------------------------- import
+    def _import_inspect(self, rec):
+        """What importing this file would mean, before anything is written."""
+        text = rec.get("text") or ""
+        if len(text) > MAX_IMPORT:
+            return self._send(400, {"error": "that file is too big to be a keymap"})
+        board, known = _resolve_board(text, rec.get("filename") or "")
+        stem = os.path.splitext(os.path.basename(rec.get("filename") or ""))[0]
+        suggested = custom.slug(stem or board or "imported") or "imported"
+        return self._send(200, {
+            "board": board, "known": known,
+            "name": suggested,
+            "taken": os.path.isdir(custom.variant_dir(suggested))
+                     if custom.NAME_RE.match(suggested) else False,
+            "records": _incoming(text),
+        })
+
+    def _import(self, rec):
+        """Restore the file's records, then write it as variants/<name>/.
+
+        Records first: a run that wrote the keymap and not the records would
+        leave bindings naming behaviors nothing can regenerate.
+        """
+        text = rec.get("text") or ""
+        if len(text) > MAX_IMPORT:
+            return self._send(400, {"error": "that file is too big to be a keymap"})
+        name = rec.get("name") or ""
+        try:
+            name = custom.variant_slug(name)
+        except ValueError as exc:
+            return self._send(400, {"error": str(exc)})
+
+        board, known = _resolve_board(text, rec.get("filename") or "")
+        if not known:
+            return self._send(400, {"error":
+                f"this keymap is for {board or 'an unknown keyboard'}, which is not "
+                f"in this config repo. Add it first (zmk keyboard add {board}) - "
+                f"without its physical layout there is nothing to import into."})
+
+        plan, scope_on, errors = _import_plan(
+            _incoming(text), rec.get("choices") or {}, rec.get("renames") or {})
+        if errors:
+            return self._send(400, {"error": "; ".join(errors)})
+
+        renamed = [(kind, was, r["name"]) for kind, r, was in plan if was]
+        for kind, r, _was in plan:
+            for tk, was, now in renamed:
+                r.update(custom.rename_in_record(r, kind, tk, was, now))
+            try:
+                EMIT[kind](r)
+            except (custom.EmitError, ValueError) as exc:
+                return self._send(400, {"error": f"{kind} {r.get('name')}: {exc}"})
+
+        scope = custom.scope_key("variant", name)
+        try:
+            for kind, r, _was in plan:
+                custom.save(kind, dict(r))
+            _scope_on(scope, scope_on)
+        except (ValueError, OSError) as exc:
+            return self._send(400, {"error": str(exc)})
+
+        out = custom.strip_block(text)
+        for kind, was, now in renamed:
+            out = custom.rename_refs(out, kind, was, now)
+        if not out.lstrip().startswith("// zmk-keyboard"):
+            out = f"// zmk-keyboard: {board}\n" + out
+
+        store = custom.load_everything()
+        try:
+            out, notes = custom.build_variant(
+                out, [], {}, store["viledance"], store["combo"], store["layer"],
+                macros=store["macro"], scope=scope)
+            path, build_path, more = custom.write_variant(
+                name, out, keyboard=board, zmk_dir=Args(REPO).zmk,
+                reset=bool(rec.get("reset")))
+        except (custom.EmitError, ValueError) as exc:
+            return self._send(400, {"error": str(exc)})
+
+        km, _combos, stopped = check.check_text(path, out, Args(REPO))
+        return self._send(200, {
+            "wrote": _rel(path), "build": _rel(build_path),
+            "folder": _rel(os.path.dirname(path)),
+            "saved": [f"{k}/{r['name']}" for k, r, _w in plan],
+            "renamed": [f"{k} {was} -> {now}" for k, was, now in renamed],
+            "warnings": notes + more + km.rep.warnings,
+            "errors": km.rep.errors + ([f"checks stopped: {stopped}"] if stopped else []),
+            "custom": store})
+
+
+# --------------------------------------------------------------------- import
+# A shared `.keymap` carries its own records in the manifest comment
+# `build_variant()` writes (see custom.RECORDS_MARK). Restoring them is part of
+# importing: without them the first re-save strips the behaviors out from under
+# the bindings that still name them.
+
+def _resolve_board(text: str, filename: str):
+    """-> (board name, is it added here).
+
+    A `// zmk-keyboard:` line is taken as the whole answer. Falling back to the
+    filename after that would let a keymap declaring a board nobody has import
+    anyway, on a stem that happens to appear in some other keyboard's path.
+    """
+    names = []
+    m = keypos.KEYBOARD_HINT_RE.search(text or "")
+    if m:
+        names.append(m.group(1))
+    stem = os.path.splitext(os.path.basename(filename or ""))[0]
+    if stem and not names:
+        names.append(stem)
+        for sep in ("-", "."):
+            while sep in names[-1]:
+                names.append(names[-1].rsplit(sep, 1)[0])
+
+    args = Args(REPO)
+    roots = keypos.search_roots(args.root, args.zmk)
+    layouts, transforms, chosen = keypos.collect(roots)
+    for n in names:
+        ls, ts = keypos.candidates_for(n, roots, layouts, transforms, chosen)
+        if ls or ts:
+            return n, True
+    return (names[0] if names else ""), False
+
+
+def _incoming(text: str):
+    """Each record the file carries, against what is already in the store."""
+    manifest = custom.read_manifest(text)
+    store = custom.load_everything()
+    local = {(kind, custom.slug(r.get("name", ""))): r
+             for kind, recs in store.items() for r in recs}
+    rows = []
+    for kind in ("viledance", "macro", "layer", "combo"):
+        for rec in manifest[kind]:
+            name = custom.slug(rec.get("name", ""))
+            cur = local.get((kind, name))
+            if cur is None:
+                status = "new"
+            elif custom.portable(cur) == custom.portable(rec):
+                status = "same"
+            else:
+                status = "clash"
+            rows.append({"kind": kind, "name": name, "status": status,
+                         "incoming": custom.portable(rec),
+                         "local": custom.portable(cur) if cur else None})
+    return rows
+
+
+def _board_wide(kind: str, rec: dict) -> bool:
+    return kind == "combo" or (kind == "layer"
+                               and (rec.get("mode") or "lt") == "conditional")
+
+
+def _import_plan(rows, choices, renames):
+    """-> (plan, scope_on, errors). `plan` is [(kind, record, renamed from or "")]."""
+    existing = {(k, custom.slug(r.get("name", "")))
+                for k, recs in custom.load_everything().items() for r in recs}
+    plan, scope_on, errors = [], [], []
+    for row in rows:
+        kind, name, key = row["kind"], row["name"], f"{row['kind']}:{row['name']}"
+        final = name
+        if row["status"] == "clash":
+            choice = choices.get(key)
+            if choice == "drop":
+                pass
+            elif choice == "rename":
+                final = custom.slug(renames.get(key) or (name + "_2"))
+                if not custom.NAME_RE.match(final or ""):
+                    errors.append(f"{kind} {name}: {final!r} is not a valid name")
+                elif (kind, final) in existing:
+                    errors.append(f"{kind} {name}: {final} is taken too")
+                else:
+                    existing.add((kind, final))
+                    plan.append((kind, {**row["incoming"], "name": final}, name))
+            else:
+                errors.append(f"{kind} {name} exists here and differs - "
+                              f"rename it or drop it")
+        elif row["status"] == "new":
+            existing.add((kind, name))
+            plan.append((kind, row["incoming"], ""))
+        if _board_wide(kind, row["incoming"]):
+            scope_on.append((kind, final))
+    return plan, scope_on, errors
+
 
 def _rel(path: str) -> str:
     """Paths go back to the page relative to the VileMK checkout, never absolute
@@ -366,6 +566,25 @@ def _carry_scope(src: str, dst: str) -> None:
         if bool(scopes.get(dst)) == on:
             continue
         scopes[dst] = on
+        rec["scopes"] = scopes
+        custom.save(kind, rec)
+
+
+def _scope_on(scope: str, wanted) -> None:
+    """Switch named board-wide records on for one scope.
+
+    An imported file carries its combos and conditional layers in the manifest
+    because they were written into it, so they belong to the variant being
+    written here whether the record was restored, renamed or already local.
+    """
+    want = {(k, custom.slug(n)) for k, n in wanted}
+    for kind, rec in _scoped_records():
+        if (kind, custom.slug(rec.get("name", ""))) not in want:
+            continue
+        scopes = rec.get("scopes") or {}
+        if scopes.get(scope):
+            continue
+        scopes[scope] = True
         rec["scopes"] = scopes
         custom.save(kind, rec)
 
