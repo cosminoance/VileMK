@@ -1,58 +1,46 @@
 import { useEffect, useState } from "react";
 
-import { getState, type State } from "./lib/api";
+import { getState } from "./lib/api";
+import { KeymapView } from "./components/KeymapView";
+import { Sidebar } from "./components/Sidebar";
+import { LIVE, StoreProvider, useStore } from "./state/store";
+import logo from "../../vilemk/webui/assets/logo.png";
 
-// Phase 1 shell. It exists to prove the data path: the page is served by
-// Vite or by `vilemk.webui.server`, and either way the payload arrives from
-// `GET /api/state` instead of a baked `<script id="data">`. The board, the
-// editor and the menu land in Phase 3; the old page keeps working until then.
+function Shell() {
+  const { s } = useStore();
+  return <>
+    <header>
+      <span className="brand"><img src={logo} alt="VileMK" /></span>
+      <span className="meta">
+        {s.data.repo_path} &middot; generated {s.data.generated} &middot;{" "}
+        {LIVE(s) ? "live · saving to custom/" : "read-only"}
+      </span>
+    </header>
+    <div className="wrap">
+      <Sidebar />
+      <KeymapView />
+    </div>
+  </>;
+}
+
 export function App() {
-  const [data, setData] = useState<State | null>(null);
+  const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getState().then(setData, (e: Error) => setError(e.message));
   }, []);
 
-  if (error) {
+  if (error)
     return (
-      <main className="shell">
+      <main className="boot">
         <h1>VileMK</h1>
-        <p className="bad">
-          Could not read <code>/api/state</code>: {error}
-        </p>
-        <p>
-          The Python server has to be running: <code>make design</code>.
-        </p>
+        <p className="bad">Could not read <code>/api/state</code>: {error}</p>
+        <p>The Python server has to be running: <code>make design</code>.</p>
       </main>
     );
-  }
+  if (!data)
+    return <main className="boot"><h1>VileMK</h1><p>Reading the config repo…</p></main>;
 
-  if (!data) {
-    return (
-      <main className="shell">
-        <h1>VileMK</h1>
-        <p>Reading the config repo…</p>
-      </main>
-    );
-  }
-
-  const keymaps = data.keymaps ?? [];
-  return (
-    <main className="shell">
-      <h1>VileMK</h1>
-      <p>
-        Repo <code>{data.repo_path}</code>, {keymaps.length} keymap
-        {keymaps.length === 1 ? "" : "s"}, writes{" "}
-        {data.live ? "enabled" : "disabled"}.
-      </p>
-      <ul>
-        {keymaps.map((km: any) => (
-          <li key={km.id}>
-            <code>{km.id}</code> — {(km.layers ?? []).length} layers
-          </li>
-        ))}
-      </ul>
-    </main>
-  );
+  return <StoreProvider data={data}><Shell /></StoreProvider>;
 }

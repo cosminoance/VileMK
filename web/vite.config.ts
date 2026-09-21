@@ -28,5 +28,11 @@ export default defineConfig({
     proxy: {
       "/api": { target: "http://127.0.0.1:7879", changeOrigin: true },
     },
+    // The logo and the favicon are imported from vilemk/webui/assets/, which is
+    // outside this root. They belong to the Python package - build.py baked the
+    // same two files into the static page - so the app references them where
+    // they live rather than keeping a second copy under web/. `vite build`
+    // resolves them anyway; the dev server needs to be told they are readable.
+    fs: { allow: [".."] },
   },
 });

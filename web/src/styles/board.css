@@ -1,0 +1,37 @@
+/* Ported from page/board.css, for the SVG board.
+   A key was a `<div class="k">` with three absolutely-positioned spans and a
+   flex-centred label; it is a `<g class="k">` holding one `<rect>` and its
+   `<text>`s now. The class names and the colours are the same, so the state
+   rules read the same - what changes is that a background is a `fill` and a
+   border is a `stroke`, and that position is an attribute rather than a rule.
+   Text sizes stay in Board.tsx, which needs them for the line arithmetic. */
+.board{display:block;margin:0 0 18px}
+.k rect{fill:var(--key);stroke:var(--key-line);stroke-width:1}
+.k text{fill:var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+/* The shifted legend, printed where a real keycap prints it: above the plain
+   one, exactly like the picker's `.up`. Deliberately NOT `.hint`'s accent - a
+   hint is another outcome of the binding, this is the same outcome with shift
+   held, which is the OS's doing and not the keymap's. */
+.k .shift{fill:var(--muted)}
+.k .pos{fill:var(--muted);font-size:9px;
+  font-family:ui-sans-serif,system-ui,sans-serif}
+.k .hint{fill:var(--accent);font-size:9px}
+.k .was{fill:var(--diff)}
+.k.diff rect{stroke:var(--diff);fill:var(--diff-soft)}
+.k.hot rect{stroke:var(--combo);fill:var(--combo-soft)}
+.k.empty{opacity:.45}
+.k.compound rect{stroke-dasharray:3 2}
+.cols{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+section.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:10px 12px;min-width:280px;flex:1}
+section.card h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:12px}
+td,th{text-align:left;padding:3px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500}
+tr.combo:hover{background:var(--combo-soft)}
+tr.usedby:hover{background:var(--accent-soft)}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.warn{background:var(--warn-soft);color:var(--warn);border-radius:6px;padding:6px 10px;
+  margin-bottom:10px;font-size:12px}
+.legend{color:var(--muted);font-size:12px;margin-bottom:10px}
