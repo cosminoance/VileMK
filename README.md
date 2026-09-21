@@ -84,7 +84,22 @@ The ZMK CLI sets up and builds. Mappings change in the VileMK server, and
 
 ## Requirements
 
-Python 3.9+. Clone and run; there is nothing to install.
+Python 3.9+. Clone and run; the Python side has no dependencies and nothing to
+install.
+
+The keymap UI is being rewritten in React ([docs/react-migration.md](docs/react-migration.md)),
+and that half needs **Node**. Its build output, `vilemk/webui/dist/`, is generated
+rather than committed, so build it once after cloning and again whenever anything
+under `web/src/` changes:
+
+```bash
+make web
+```
+
+Until the rewrite lands there are two pages: the current one at
+<http://127.0.0.1:7879/> and the React one at
+<http://127.0.0.1:7879/app/>. `make design` serves both. Everything below
+describes the current page, and `make web` is not needed to use it.
 
 Optionally, `pyproject.toml` installs the four tools as commands
 (`vilemk-ui`, `vilemk-keypos`, `vilemk-check`, `vilemk-design`), so they work
@@ -319,6 +334,8 @@ make design   # the editable viewer
 make check    # validation only: build.yaml, then config/ and variants/
 make ui       # write keymap-ui.html
 make view     # write it and open it in your default browser
+make web      # build the React UI (needs Node) into vilemk/webui/dist/
+make webdev   # the Vite dev server for it, with live reload
 make pos      # key-position maps
 make install  # put the vilemk-* commands on your PATH
 make clean

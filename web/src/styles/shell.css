@@ -1,0 +1,12 @@
+/* Phase 1 only. The real stylesheet arrives with the components in Phase 3,
+   ported from page/shell.css, page/board.css and page/editor.css.
+   Variable names come from tokens.css and are the page's existing ones. */
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+.shell { padding: 24px; max-width: 900px; }
+.shell code { color: var(--accent); }
+.bad { color: var(--warn); }

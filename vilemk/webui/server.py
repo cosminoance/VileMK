@@ -10,6 +10,7 @@ standard library, bound to loopback, with a handful of JSON endpoints over the
 
 Endpoints:
     GET    /                      the viewer, regenerated on every load
+    GET    /app/...               the React app from `dist/` (see below)
     GET    /api/state             keymaps + custom items + repo info
     POST   /api/viledance         save one (JSON body, `name` required)
     POST   /api/macro             save one (a list of steps)
@@ -25,6 +26,12 @@ Endpoints:
     POST   /api/variant           write variants/<name>/ (keymap + build.yaml;
                                   `reset: true` adds the settings_reset entries)
     DELETE /api/variant/<name>    remove variants/<name>/
+
+`/` and `/app/` are two front ends over the same endpoints while the React
+port is in progress (docs/react-migration.md). `/` is the string-rendered page
+`build.py` generates; `/app/` is the built React app under `dist/`, which is
+not in the repo - `make web` writes it. When the port lands, `/app/` becomes
+`/` and everything behind the first route goes away.
 """
 
 from __future__ import annotations
@@ -32,7 +39,9 @@ from __future__ import annotations
 import argparse
 import errno
 import json
+import mimetypes
 import os
+import posixpath
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -45,6 +54,23 @@ EMIT = {"viledance": custom.emit_viledance, "combo": custom.emit_combo,
         "macro": custom.emit_macro}
 
 PORT = 7879          # fixed, so the page is always at the same address
+
+# Where `npm run build` in web/ puts its output. Unlike `page/`, this is not in
+# the repo and not in a fresh clone: it is generated, `.gitignore`'s bare
+# `dist/` matches it at any depth, and `make web` is what creates it. Missing
+# is therefore an ordinary state with an ordinary answer, not an error to
+# swallow - `_static()` says which command fixes it.
+DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
+APP = "/app"         # served under a prefix so the old page keeps `/`
+
+# `mimetypes` reads /etc/mime.types, which varies by machine and has been seen
+# to call .js `text/plain`. A module script with the wrong type is refused by
+# the browser, so the types the build actually emits are pinned here.
+CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript",
+          ".mjs": "text/javascript", ".css": "text/css; charset=utf-8",
+          ".json": "application/json", ".map": "application/json",
+          ".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp",
+          ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2"}
 
 REPO, HOW, QUIET = ".", "", False
 
@@ -88,13 +114,14 @@ class Handler(BaseHTTPRequestHandler):
         self._send(403, {"error": f"refusing request for host {host!r}"})
         return False
 
-    def _send(self, code, obj=None, body=None, ctype="application/json"):
+    def _send(self, code, obj=None, body=None, ctype="application/json",
+              cache="no-store"):
         if body is None:
             body = json.dumps(obj).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
 
@@ -114,12 +141,73 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001 - show it in the browser
                 return self._send(500, body=f"<pre>{exc}</pre>".encode(),
                                   ctype="text/html; charset=utf-8")
+        if self.path == APP or self.path.startswith(APP + "/"):
+            return self._static(self.path[len(APP):])
         if self.path == "/api/state":
             data = keymap.collect_data(Args(REPO))
             data["custom"] = custom.load_everything()
             data["repo_path"] = REPO
+            # `page()` sets these three on the baked payload; the React app
+            # reads the same fields over the wire, so send them here too.
+            # `live` is what makes the write controls render at all.
+            data["repo_found_via"] = HOW
+            data["live"] = True
             return self._send(200, data)
         self._send(404, {"error": "not found"})
+
+    # --------------------------------------------------------------- the app
+    def _static(self, rel: str):
+        """Serve `dist/` under /app, with an SPA fallback to index.html.
+
+        Three cases, in order: the file exists and is served; the request has
+        no file extension, so it is a client-side route and gets index.html;
+        anything else is a genuine 404 (a missing asset must not come back as
+        HTML, or the browser reports a syntax error in a script instead of a
+        missing one).
+        """
+        index = os.path.join(DIST, "index.html")
+        if not os.path.isfile(index):
+            return self._send(503, cache="no-store", ctype="text/html; charset=utf-8",
+                              body=b"<!doctype html><meta charset=utf-8>"
+                                   b"<title>VileMK</title>"
+                                   b"<style>body{font:14px/1.6 system-ui;margin:3rem auto;"
+                                   b"max-width:34rem}code{background:#eee;padding:2px 5px}"
+                                   b"</style><h1>The app is not built yet</h1>"
+                                   b"<p>This page is compiled from <code>web/</code> into "
+                                   b"<code>vilemk/webui/dist/</code>, which is not in the "
+                                   b"repository. Build it once:</p>"
+                                   b"<pre><code>make web</code></pre>"
+                                   b"<p>It needs Node. The old page is still at "
+                                   b"<a href=\"/\">/</a>.</p>")
+
+        # posixpath, not os.path: the URL is always "/" separated, whatever the
+        # platform. normpath collapses "..", and the prefix check below is what
+        # actually refuses to leave dist/ - do not drop it.
+        clean = posixpath.normpath(posixpath.join("/", rel)).lstrip("/")
+        path = os.path.normpath(os.path.join(DIST, *clean.split("/"))) if clean else index
+        if os.path.commonpath([os.path.realpath(path), os.path.realpath(DIST)]) \
+                != os.path.realpath(DIST):
+            return self._send(403, {"error": "outside dist"})
+
+        if not os.path.isfile(path):
+            if os.path.splitext(clean)[1]:
+                return self._send(404, {"error": "not found"})
+            path = index                       # a client-side route
+
+        try:
+            with open(path, "rb") as fh:
+                body = fh.read()
+        except OSError as exc:
+            return self._send(500, {"error": str(exc)})
+
+        ext = os.path.splitext(path)[1].lower()
+        ctype = CTYPES.get(ext) or mimetypes.guess_type(path)[0] or "application/octet-stream"
+        # Vite fingerprints everything under assets/, so those are immutable and
+        # index.html must never be cached or a rebuild keeps serving old script
+        # tags.
+        cache = ("public, max-age=31536000, immutable"
+                 if clean.startswith("assets/") else "no-store")
+        self._send(200, body=body, ctype=ctype, cache=cache)
 
     def do_POST(self):
         if not self._guard():

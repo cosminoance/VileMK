@@ -1,0 +1,25 @@
+{
+  "name": "vilemk-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The VileMK keymap UI. Built into ../vilemk/webui/dist/, which vilemk.webui.server serves.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}

@@ -7,6 +7,12 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+#
+# The bare `dist/` below matches at any depth, so it also covers
+# `vilemk/webui/dist/`, the React app's build output. That is deliberate: the
+# built bundle is not committed and `make web` regenerates it (see
+# docs/react-migration.md, "Packaging"). Do not anchor this pattern to the
+# repo root.
 .Python
 build/
 develop-eggs/
