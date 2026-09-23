@@ -1,0 +1,53 @@
+name: version
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read the version being released
+        id: v
+        run: echo "version=$(python3 version_increase.py --current)" >> "$GITHUB_OUTPUT"
+
+      - name: Check the changelog entry exists
+        run: |
+          file="changelog/${{ steps.v.outputs.version }}.md"
+          if [ -f "$file" ]; then
+            echo "::notice::$file"
+          else
+            echo "::warning::no $file - this version ships with no user-facing notes"
+          fi
+
+      - name: Tag
+        run: |
+          tag="v${{ steps.v.outputs.version }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::warning::$tag already exists, leaving it alone"
+          else
+            git tag "$tag"
+            git push origin "$tag"
+          fi
+
+      - name: Bump and push
+        run: |
+          next=$(python3 version_increase.py)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version/version.json pyproject.toml
+          git commit -m "version $next [skip ci]"
+          git push origin HEAD:main

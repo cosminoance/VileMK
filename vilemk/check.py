@@ -705,26 +705,24 @@ def print_report(km: KeymapFile, n_combos: int) -> None:
     print(f"{len(km.rep.errors)} error(s), {len(km.rep.warnings)} warning(s)")
 
 
-def check_file(path, args) -> int:
-    """Run every check over one keymap, print the report, return 1 on any ERROR.
+def check_text(path, raw, args):
+    """Run every check over one keymap -> (KeymapFile, combo count, stopped).
 
-    Brackets first and alone: with an unbalanced brace the node boundaries are
-    wrong, so every check after it would report nonsense against the wrong lines.
+    Prints nothing. `stopped` names what ended the run early (`"brackets"`,
+    `"no root"`) and is empty when every check ran. Brackets are checked first
+    and alone: with an unbalanced brace the node boundaries are wrong and every
+    later check reports against the wrong lines.
     """
-    raw = open(path, encoding="utf-8").read()
     src = strip_comments(raw)
     km = KeymapFile(path, raw, src, args)
 
     if not check_balance(km.rep, src):
-        print("\n".join(km.rep.errors))
-        print("\nFix the bracket errors first; the remaining checks were skipped.")
-        return 1
+        return km, 0, "brackets"
 
     roots = find_roots(src)
     if not roots:
         km.rep.error(0, "no root node `/ { ... }` found")
-        print("\n".join(km.rep.errors))
-        return 1
+        return km, 0, "no root"
 
     index_nodes(km, roots)
     check_behavior_nodes(km)
@@ -733,6 +731,19 @@ def check_file(path, args) -> int:
     check_behavior_bindings(km)
     n_combos = check_combos(km)
     check_conditional_layers(km)
+    return km, n_combos, ""
+
+
+def check_file(path, args) -> int:
+    """Run every check over one keymap, print the report, return 1 on any ERROR."""
+    raw = open(path, encoding="utf-8").read()
+    km, n_combos, stopped = check_text(path, raw, args)
+
+    if stopped:
+        print("\n".join(km.rep.errors))
+        if stopped == "brackets":
+            print("\nFix the bracket errors first; the remaining checks were skipped.")
+        return 1
 
     print_report(km, n_combos)
     return 1 if km.rep.errors else 0

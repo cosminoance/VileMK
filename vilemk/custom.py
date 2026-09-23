@@ -45,6 +45,7 @@ import os
 import re
 
 from . import PROJECT_DIR, keymap
+from .check import DISPLAY_SHIELD_RE, _conf_turns_off, _defconfig_turns_on
 CUSTOM_DIR = os.path.join(PROJECT_DIR, "custom")
 DIRS = {"viledance": os.path.join(CUSTOM_DIR, "viledance"),
         "combo": os.path.join(CUSTOM_DIR, "combo"),
@@ -62,6 +63,10 @@ SECOND_ROW_FLAVOR = "balanced"
 
 BEGIN_MARK = "// BEGIN vilemk custom - generated, edits here are overwritten"
 END_MARK = "// END vilemk custom"
+# The records the block was generated from, so import can restore them. Must
+# stay on one line: `//` ends at the newline, and `/* */` is unusable because a
+# macro's `text` step can contain `*/`.
+RECORDS_MARK = "// vilemk-records: "
 
 
 # ------------------------------------------------------------------ storage
@@ -544,6 +549,97 @@ def emit_layer(rec: dict):
     return nodes, binding
 
 
+# --------------------------------------------------------- the record manifest
+# Modifiers are absent because they emit no node: they resolve to `LS(LA(A))` on
+# the key, so the keymap already carries everything it needs.
+
+def portable(rec: dict) -> dict:
+    """A record without the fields that only mean something on this machine."""
+    return {k: v for k, v in rec.items() if k not in ("kind", "scopes", "broken")}
+
+
+def manifest(viledances=(), combos=(), layers=(), macros=()) -> str:
+    """The `// vilemk-records:` line for a block built from these records."""
+    payload = {"viledance": [portable(r) for r in viledances],
+               "combo": [portable(r) for r in combos],
+               "layer": [portable(r) for r in layers],
+               "macro": [portable(r) for r in macros]}
+    return RECORDS_MARK + json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def read_manifest(text: str):
+    """The records a keymap carries -> {kind: [rec]}. Malformed reads as empty."""
+    out = {k: [] for k in DIRS}
+    i = text.find(RECORDS_MARK)
+    if i == -1:
+        return out
+    line = text[i + len(RECORDS_MARK):].split("\n", 1)[0]
+    try:
+        got = json.loads(line)
+    except ValueError:
+        return out
+    if not isinstance(got, dict):
+        return out
+    for kind in out:
+        recs = got.get(kind)
+        if not isinstance(recs, list):
+            continue
+        out[kind] = [r for r in recs if isinstance(r, dict) and slug(r.get("name", ""))]
+    return out
+
+
+def _outside_comments(text: str, fn):
+    """Apply `fn` to the parts of `text` that are not comments."""
+    out, at = [], 0
+    for m in _COMMENT_RE.finditer(text):
+        out.append(fn(text[at:m.start()]))
+        out.append(m.group(0))
+        at = m.end()
+    out.append(fn(text[at:]))
+    return "".join(out)
+
+
+def rename_refs(text: str, kind: str, old: str, new: str) -> str:
+    """Point every `&label` for one record at its renamed self, outside comments."""
+    pairs = list(zip(_defines(kind, {"name": old}), _defines(kind, {"name": new})))
+    if not pairs:
+        return text
+
+    def sub(part: str) -> str:
+        for a, b in pairs:
+            part = re.sub(r"&" + re.escape(a) + r"\b", "&" + b, part)
+        return part
+
+    return _outside_comments(text, sub)
+
+
+_SLOT_FIELDS = {"viledance": VILE_SLOTS, "layer": ("key",), "combo": ("binding",)}
+
+
+def rename_in_record(rec: dict, kind: str, target: str, old: str, new: str) -> dict:
+    """The record with its own slots pointing at a renamed record of `target` kind."""
+    pairs = list(zip(_defines(target, {"name": old}), _defines(target, {"name": new})))
+    if not pairs:
+        return rec
+
+    def sub(text):
+        if not isinstance(text, str):
+            return text
+        for a, b in pairs:
+            text = re.sub(r"&" + re.escape(a) + r"\b", "&" + b, text)
+        return text
+
+    out = dict(rec)
+    for field in _SLOT_FIELDS.get(kind, ()):
+        if field in out:
+            out[field] = sub(out[field])
+    if kind == "macro":
+        out["steps"] = [{**st, "binding": sub(st.get("binding", ""))}
+                        if isinstance(st, dict) else st
+                        for st in (out.get("steps") or [])]
+    return out
+
+
 def block(viledances=(), combos=(), layers=(), macros=()) -> str:
     """The whole generated root block: only what was passed in."""
     behaviors, errors = "", []
@@ -581,7 +677,7 @@ def block(viledances=(), combos=(), layers=(), macros=()) -> str:
             errors.append(f"{rec.get('name')}: {exc}")
     if not behaviors and not macro_nodes and not combo_nodes and not cond_nodes:
         return "", errors
-    out = [BEGIN_MARK, "/ {"]
+    out = [BEGIN_MARK, manifest(viledances, combos, layers, macros), "/ {"]
     if behaviors:
         out.append("    behaviors {\n" + behaviors + "    };")
     if macro_nodes:
@@ -845,6 +941,51 @@ def _refs(kind: str, rec: dict):
     return [split_binding(t)[0].lstrip("&") for t in texts if t]
 
 
+def reachable_records(text, viledances, combos, layers, macros, scope=""):
+    """Which records a keymap uses -> (viledances, combos, layers, macros).
+
+    `text` must already have its generated block stripped, so the scan reads
+    only what the keys name.
+
+    The reachable set, not just the directly-bound one. Seeds: every label the
+    keymap names, plus the ones the combos being written name (a combo goes on
+    no key, so its output binding is nowhere in the keymap text). Then follow
+    each chosen record's own slots, because a VileDance can tap a macro and a
+    macro can tap a VileDance - one hop is not enough.
+    """
+    live_combos = [c for c in combos if scoped_on(c, scope)]
+    pool = ([("viledance", r) for r in viledances]
+            + [("macro", r) for r in macros]
+            + [("layer", r) for r in layers
+               if (r.get("mode") or "lt") != "conditional"])
+    by_label = {}
+    for kind, rec in pool:
+        for lbl in _defines(kind, rec):
+            by_label.setdefault(lbl, (kind, rec))
+
+    pending = [m.group(1) for m in _PHANDLE_RE.finditer(text)]
+    for rec in live_combos:
+        pending += _refs("combo", rec)
+    taken = set()
+    while pending:
+        hit = by_label.get(pending.pop())
+        if hit is None or id(hit[1]) in taken:
+            continue
+        taken.add(id(hit[1]))
+        pending += _refs(hit[0], hit[1])
+
+    wanted = [r for k, r in pool if k == "viledance" and id(r) in taken]
+    live_macros = [r for k, r in pool if k == "macro" and id(r) in taken]
+    # A conditional layer is bound to no key - nothing could ever reference it -
+    # so it follows the combo rule instead: written only where it is switched on
+    # for this variant. A layer-tap follows the VileDance rule, since a key does
+    # reference it (and a plain `&lt` entry emits nothing either way).
+    live_layers = [r for r in layers
+                   if (scoped_on(r, scope) if (r.get("mode") or "lt") == "conditional"
+                       else id(r) in taken)]
+    return wanted, live_combos, live_layers, live_macros
+
+
 def build_variant(base_text, expanded_layers, assignments, viledances, combos,
                   layers=(), macros=(), rows=None, new_layers=(), scope=""):
     """Base keymap + key assignments + only the custom code those keys use.
@@ -892,42 +1033,8 @@ def build_variant(base_text, expanded_layers, assignments, viledances, combos,
     # under a binding that still points at it, and the build fails on an
     # undefined node label.
     text = strip_block(text)
-    live_combos = [c for c in combos if scoped_on(c, scope)]
-
-    # The reachable set, not just the directly-bound one. Seeds: every label the
-    # finished keymap names, plus the ones the combos being written name (a combo
-    # goes on no key, so its output binding is nowhere in the keymap text). Then
-    # follow each chosen record's own slots, because a VileDance can tap a macro
-    # and a macro can tap a VileDance - one hop is not enough.
-    pool = ([("viledance", r) for r in viledances]
-            + [("macro", r) for r in macros]
-            + [("layer", r) for r in layers
-               if (r.get("mode") or "lt") != "conditional"])
-    by_label = {}
-    for kind, rec in pool:
-        for lbl in _defines(kind, rec):
-            by_label.setdefault(lbl, (kind, rec))
-
-    pending = [m.group(1) for m in _PHANDLE_RE.finditer(text)]
-    for rec in live_combos:
-        pending += _refs("combo", rec)
-    taken = set()
-    while pending:
-        hit = by_label.get(pending.pop())
-        if hit is None or id(hit[1]) in taken:
-            continue
-        taken.add(id(hit[1]))
-        pending += _refs(hit[0], hit[1])
-
-    wanted = [r for k, r in pool if k == "viledance" and id(r) in taken]
-    live_macros = [r for k, r in pool if k == "macro" and id(r) in taken]
-    # A conditional layer is bound to no key - nothing could ever reference it -
-    # so it follows the combo rule instead: written only where it is switched on
-    # for this variant. A layer-tap follows the VileDance rule, since a key does
-    # reference it (and a plain `&lt` entry emits nothing either way).
-    live_layers = [r for r in layers
-                   if (scoped_on(r, scope) if (r.get("mode") or "lt") == "conditional"
-                       else id(r) in taken)]
+    wanted, live_combos, live_layers, live_macros = reachable_records(
+        text, viledances, combos, layers, macros, scope)
 
     gen, errors = block(wanted, live_combos, live_layers, live_macros)
     if gen:
@@ -951,6 +1058,20 @@ def strip_block(text: str) -> str:
     if j == -1:
         return text[:i].rstrip() + "\n"
     return (text[:i].rstrip() + "\n" + text[j + len(END_MARK):].lstrip("\n")).rstrip() + "\n"
+
+
+def with_manifest(text, viledances, combos, layers, macros, scope=""):
+    """`text` with a manifest added to its generated block if it lacks one.
+
+    For files written before manifests existed. The records are the ones the
+    next save would write, so a store that has drifted wins over the file.
+    """
+    if RECORDS_MARK in text or BEGIN_MARK not in text:
+        return text
+    recs = reachable_records(strip_block(text), viledances, combos, layers,
+                             macros, scope)
+    at = text.find(BEGIN_MARK) + len(BEGIN_MARK)
+    return text[:at] + "\n" + manifest(*recs) + text[at:]
 
 
 def variant_slug(name: str) -> str:
@@ -1051,6 +1172,63 @@ def _is_central(entry) -> bool:
     return half in (None, "left")
 
 
+# Parts: the shields a vendor adds to a half on top of the keyboard itself
+# (`nice_view` on `eyelash_sofle_left`). The vendor ships one build list for every
+# way the keyboard is sold, so it lists them all; which ones a given keyboard
+# actually has is the user's answer, ticked in the variant bar and passed in as
+# `parts`. A screen dropped from a board whose defconfig turns the display on
+# needs the display switched off too, or the build fails on the missing
+# `zephyr,display` node.
+DISPLAY_OFF_FLAG = "-DCONFIG_ZMK_DISPLAY=n"
+DISPLAY_FLAG_RE = re.compile(r"\s*-DCONFIG_ZMK_DISPLAY=\S*")
+
+
+def _slot(keyboard: str, entry) -> str:
+    """The name that says which half an entry builds: the board for a keyboard
+    that is its own board, the keyboard shield for one on a generic controller."""
+    for n in [entry.board] + entry.shields:
+        if n and (n == keyboard or keymap.split_half(n)[0] == keyboard):
+            return n
+    return entry.board
+
+
+def _vendor_parts(keyboard: str, zmk_dir: str):
+    """-> {slot: [shield, ...]}, the add-ons on the vendor's plain entries."""
+    out = {}
+    for v in _entries_for(keyboard, keymap.vendor_build_entries(zmk_dir)):
+        if v.get("snippet") or v.get("artifact-name"):
+            continue
+        slot = _slot(keyboard, v)
+        extra = [sh for sh in v.shields if sh != slot and sh not in out.get(slot, [])]
+        out.setdefault(slot, []).extend(extra)
+    return {k: v for k, v in out.items() if v}
+
+
+def part_id(slot: str, shield: str) -> str:
+    return f"{slot}:{shield}"
+
+
+def parts_for(keyboard: str, zmk_dir: str = ".zmk", build_path: str = ""):
+    """The parts the page offers for `keyboard`, each ticked as the current build
+    list has it: the variant's own `build_path` when there is one, else the
+    repo's build list, else the vendor's (everything on)."""
+    vendor = _vendor_parts(keyboard, zmk_dir)
+    if not vendor:
+        return []
+    source = []
+    for path in (build_path, keymap.find_build_yaml()):
+        if path and os.path.isfile(path):
+            source = [e for e in _entries_for(
+                          keyboard, keymap.parse_build_yaml(keymap.read_text(path)))
+                      if RESET_SHIELD not in e.shields]
+            if source:
+                break
+    have = {part_id(_slot(keyboard, e), sh) for e in source for sh in e.shields}
+    return [{"id": part_id(slot, sh), "slot": slot, "shield": sh,
+             "on": not source or part_id(slot, sh) in have}
+            for slot, shields in vendor.items() for sh in shields]
+
+
 def _add_flags(cmake_args: str, flags) -> str:
     """Append each flag whose symbol the args do not already set."""
     for f in flags:
@@ -1115,7 +1293,7 @@ def _with_keymap_file(cmake_args: str, keymap_rel: str) -> str:
 
 
 def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
-                   keymap_text: str = "", reset: bool = False):
+                   keymap_text: str = "", reset: bool = False, parts=None):
     """-> (build.yaml text, warnings) for one keyboard and one keymap.
 
     Reads the config repo, so the caller must already be `chdir`-ed into it -
@@ -1129,6 +1307,10 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
     off by default because it doubles the artifacts, and on by default in the
     page for a keymap that binds `&studio_unlock` - the keyboards that can end up
     with a stored keymap overriding this one are exactly those.
+
+    `parts` is `{part_id: bool}` for the add-on shields the vendor lists
+    (`parts_for()`): ticked ones are kept or added, unticked ones dropped. None
+    keeps the source entries' shields as they are.
     """
     keymap_rel = f"config/{keymap_name}"
     warnings, source = [], ""
@@ -1190,12 +1372,34 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
             body += _reset_body([keyboard])
         return _build_yaml_text(keyboard, keymap_name, head, body), warnings
 
+    vendor_parts = _vendor_parts(keyboard, zmk_dir)
     seen, body = set(), []
     for e in picked:
         central = _is_central(e)
+        slot = _slot(keyboard, e)
+        offered = vendor_parts.get(slot, [])
+        shields = list(e.shields)
+        if parts is not None:
+            shields = [sh for sh in shields
+                       if sh not in offered or parts.get(part_id(slot, sh), True)]
+            shields += [sh for sh in offered
+                        if parts.get(part_id(slot, sh)) and sh not in shields]
+        # A screen the vendor offers and this half does not get: switch the
+        # display off, unless the board never turned it on or a conf already did.
+        dropped_screen = any(DISPLAY_SHIELD_RE.search(sh) for sh in offered
+                             if sh not in shields)
+        has_screen = any(DISPLAY_SHIELD_RE.search(sh) for sh in shields)
+        display_off = (dropped_screen and not has_screen
+                       and _defconfig_turns_on(zmk_dir, e.board, "CONFIG_ZMK_DISPLAY")
+                       and not _conf_turns_off(e.board, "CONFIG_ZMK_DISPLAY"))
+        if display_off and parts is None:
+            note = (f"`{slot}` has no screen shield but its defconfig turns the "
+                    f"display on, so its entry carries {DISPLAY_OFF_FLAG}")
+            if note not in warnings:
+                warnings.append(note)
         lines = []
         for key in BUILD_YAML_KEYS:
-            value = e.get(key)
+            value = " ".join(shields) if key == "shield" else e.get(key)
             if key == "snippet" and studio and central:
                 if value and value != STUDIO_SNIPPET:
                     warnings.append(
@@ -1207,9 +1411,14 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
                 lines.append(f"{'  - ' if not lines else '    '}{key}: {value}")
         if not lines:
             continue
-        args = _add_flags(e.get("cmake-args") or "",
+        args = e.get("cmake-args") or ""
+        if parts is not None:
+            # the ticked parts decide the display, not a flag left over from before
+            args = DISPLAY_FLAG_RE.sub("", args).strip()
+        args = _add_flags(args,
                           feature_flags
-                          + ([STUDIO_FLAG] if studio and central else []))
+                          + ([STUDIO_FLAG] if studio and central else [])
+                          + ([DISPLAY_OFF_FLAG] if display_off else []))
         lines.append(f"    cmake-args: {_with_keymap_file(args, keymap_rel)}")
         block = "\n".join(lines)
         if block not in seen:            # the same half twice is one entry
@@ -1276,15 +1485,15 @@ def delete_variant(name: str) -> bool:
 
 
 def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk",
-                  reset: bool = False):
+                  reset: bool = False, parts=None):
     """Write `variants/<name>/` - the keymap, and the build list that builds it.
 
     -> (keymap path, build.yaml path or "", warnings). The build list is skipped
     only when we were not told which keyboard this is; the keymap is always
     written, since it is the thing the user asked for.
 
-    `reset` adds the `settings_reset` entries to that build list - see
-    `build_yaml_for()`.
+    `reset` adds the `settings_reset` entries to that build list, and `parts`
+    picks its add-on shields - see `build_yaml_for()`.
     """
     p = variant_path(name)
     os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -1304,7 +1513,8 @@ def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk
     build_path = ""
     if keyboard:
         yaml_text, yaml_warnings = build_yaml_for(
-            keyboard, os.path.basename(p), zmk_dir, keymap_text=text, reset=reset)
+            keyboard, os.path.basename(p), zmk_dir, keymap_text=text, reset=reset,
+            parts=parts)
         build_path = os.path.join(os.path.dirname(p), "build.yaml")
         with open(build_path, "w", encoding="utf-8") as fh:
             fh.write(yaml_text)

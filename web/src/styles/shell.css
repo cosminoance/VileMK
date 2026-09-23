@@ -1,0 +1,87 @@
+/* Ported from page/shell.css. The page's own layout: header, sidebar, bars,
+   layer tabs. Unchanged except that the boot screen (before /api/state answers)
+   has a class of its own, since the old page had no such state. */
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;gap:12px;align-items:center;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+header .brand{display:inline-flex;align-items:center;background:#14171c;border-radius:6px;
+  padding:5px 10px;line-height:0}
+header .brand img{display:block;height:20px;width:auto}
+header .meta{color:var(--muted);font-size:12px}
+.wrap{display:flex;align-items:flex-start}
+aside{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel);
+  height:calc(100vh - 42px);overflow:auto;position:sticky;top:42px;padding:10px}
+.wrap.closed aside{display:none}
+/* The collapse handle, riding the sidebar's right border: a tab of the panel's
+   own surface, overlapping the border by a pixel so the two read as one piece.
+   Sticky at the same offset as the sidebar, so it stays put while the board
+   scrolls. Collapsed it is the only thing left of the panel, which is why it
+   lives outside `aside` and keeps its own border on that side. */
+.railtab{flex:none;align-self:flex-start;position:sticky;top:52px;z-index:1;
+  width:16px;height:56px;margin-left:-1px;padding:0;
+  border:1px solid var(--line);border-left-color:var(--panel);
+  border-radius:0 6px 6px 0;background:var(--panel);color:var(--muted);
+  cursor:pointer;font:14px/1 ui-sans-serif,system-ui,sans-serif}
+.railtab:hover{background:var(--accent-soft);color:var(--accent);
+  border-color:var(--accent);border-left-color:var(--accent-soft)}
+.wrap.closed .railtab{margin-left:0;border-left-color:var(--line)}
+aside input{width:100%;padding:6px 8px;margin-bottom:8px;border:1px solid var(--line);
+  border-radius:6px;background:var(--bg);color:var(--ink)}
+aside .group{font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);margin:12px 0 4px}
+aside button{display:block;width:100%;text-align:left;padding:6px 8px;border:0;
+  border-radius:6px;background:none;color:var(--ink);cursor:pointer;font:inherit}
+aside button:hover{background:var(--bg)}
+aside button.sel{background:var(--accent-soft);color:var(--accent);font-weight:600}
+aside button small{display:block;color:var(--muted);font-weight:400;font-size:11px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Centred column. `min-width:0` keeps a wide child (the board, a `<pre>`) from
+   forcing the flex item wider than the viewport instead of scrolling itself. */
+main{flex:1;min-width:0;width:100%;max-width:1200px;margin:0 auto;
+  padding:16px 20px 60px}
+main.boot{padding:24px;max-width:900px}
+main.boot code{color:var(--accent)}
+main.boot .bad{color:var(--warn)}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.bar h2{margin:0;font-size:17px}
+.bar .path{color:var(--muted);font-size:12px;font-family:ui-monospace,monospace}
+/* A `<select>` sizes itself to its longest option, and the compare-with list
+   holds absolute paths - so it is capped, and allowed to shrink inside the
+   bar, instead of setting the page's width. */
+select,.toggle{padding:5px 8px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel);color:var(--ink);font:inherit}
+select{min-width:0;max-width:100%}
+label.toggle{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px}
+.tabs button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;
+  background:var(--panel);color:var(--ink);cursor:pointer;font:inherit}
+.tabs button.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* The version chip sits under the wordmark and opens the changelog. Styled as
+   a link rather than a button so it reads as one; the `?` bubble is the only
+   hint that there is something behind it. */
+header .ident{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.verchip{background:none;border:0;padding:0;cursor:pointer;
+  color:var(--muted);font:11px/1 inherit;letter-spacing:.02em;
+  display:inline-flex;align-items:center;gap:5px}
+.verchip:hover{color:var(--accent);text-decoration:underline}
+.q{display:inline-flex;align-items:center;justify-content:center;
+  width:13px;height:13px;border-radius:50%;border:1px solid currentColor;
+  font-size:9px;line-height:1;text-decoration:none}
+/* A `?` that explains the control beside it, on hover or keyboard focus. */
+.qhelp{position:relative;display:inline-flex;color:var(--muted);cursor:help}
+.qhelp:hover,.qhelp:focus-visible{color:var(--accent);outline:none}
+.qhelp .tip{display:none;position:absolute;top:calc(100% + 6px);right:-8px;z-index:6;
+  width:300px;max-width:80vw;padding:8px 10px;border:1px solid var(--line);
+  border-radius:6px;background:var(--panel);color:var(--ink);
+  font-size:12px;line-height:1.45;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+.qhelp:hover .tip,.qhelp:focus .tip{display:block}
+
+.clog{max-height:60vh;overflow:auto;margin:12px 0}
+.clog section{padding:0 0 10px;border-bottom:1px solid var(--line)}
+.clog section:last-child{border-bottom:0}
+.clog h3{margin:12px 0 6px;font-size:13px;color:var(--accent)}
+.clog section:first-child h3{margin-top:0}
+.clog ul{margin:0;padding-left:18px}
+.clog li{margin:3px 0;font-size:13px}

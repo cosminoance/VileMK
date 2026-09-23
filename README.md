@@ -84,10 +84,21 @@ The ZMK CLI sets up and builds. Mappings change in the VileMK server, and
 
 ## Requirements
 
-Python 3.9+. Clone and run; there is nothing to install.
+**Python 3.9+ and Node.** The Python side has no dependencies, but the keymap
+UI is a React app in `web/` and has to be built once. Its output,
+`vilemk/webui/dist/`, is generated rather than committed, so build it after
+cloning and again whenever anything under `web/src/` changes:
 
-Optionally, `pyproject.toml` installs the four tools as commands
-(`vilemk-ui`, `vilemk-keypos`, `vilemk-check`, `vilemk-design`), so they work
+```bash
+make web
+```
+
+`make design` depends on that target, so the ordinary path stays one command.
+Once `node_modules/` exists the build takes a few seconds. If you ever see a
+page saying the app is not built yet, that is the command it is asking for.
+
+Optionally, `pyproject.toml` installs the three tools as commands
+(`vilemk-keypos`, `vilemk-check`, `vilemk-design`), so they work
 from inside the config repo without a path to this one:
 
 ```bash
@@ -98,10 +109,9 @@ uv tool install --editable .    # or: pip install -e .
 
 | Command | What it does |
 |---|---|
-| `python3 -m vilemk.webui.build` | Builds `keymap-ui.html`: every keymap drawn on its real key positions, with layer tabs, combos, and a compare view that highlights what a variation changed. |
 | `python3 -m vilemk.keypos config/<board>.keymap` | Prints the key-position map for a keyboard: the numbers `key-positions` and `hold-trigger-key-positions` refer to. |
 | `python3 -m vilemk.check config/<board>.keymap` | Static validation before a CI round-trip: binding counts per layer, out-of-range positions, undefined `&labels`, bad keycodes, arity, braces. It also reads `build.yaml` and flags halves built from different keymaps, a `KEYMAP_FILE` that names nothing, a part the vendor builds that your entry leaves out, and colliding artifact names. Pass `--no-build-list` for keymaps only. |
-| `python3 -m vilemk.webui.server` | The same viewer, editable: design VileDances, macros, combos, modifiers and layer bindings in Vial-style panels, click keys to reassign them, save to `custom/` and `variants/`. |
+| `python3 -m vilemk.webui.server` | The app: every keymap drawn on its real key positions, with layer tabs, combos and a compare view, plus the editor — design VileDances, macros, combos, modifiers and layer bindings in Vial-style panels, click keys to reassign them, save to `custom/` and `variants/`, and export or import a `.keymap`. |
 
 ### Designing a keymap: every tab in the app
 
@@ -314,18 +324,17 @@ anything designed but never bound stays out of the file.
 ### make
 
 ```
-make          # check every keymap, then build the viewer and open it
-make design   # the editable viewer
+make          # check every keymap, then build the app and serve it
+make design   # build the app if needed, then serve it
 make check    # validation only: build.yaml, then config/ and variants/
-make ui       # write keymap-ui.html
-make view     # write it and open it in your default browser
+make web      # build the UI (needs Node) into vilemk/webui/dist/
+make webdev   # the Vite dev server for it, with live reload
 make pos      # key-position maps
 make install  # put the vilemk-* commands on your PATH
 make clean
 ```
 
-Pass extra flags through `ARGS`, e.g. `make ui ARGS="--all"` or
-`make check ARGS="config/corne.keymap"`.
+Pass extra flags through `ARGS`, e.g. `make check ARGS="config/corne.keymap"`.
 
 `make` only looks for a Makefile in the current directory; it has none of the
 repo-finding logic the tools do. From anywhere else, point it here:
@@ -334,7 +343,7 @@ repo-finding logic the tools do. From anywhere else, point it here:
 make -C ~/git/VileMK          # or: make -C ~/git/VileMK check
 ```
 
-Or run `make install` once and use `vilemk-ui --open`, `vilemk-check` and
+Or run `make install` once and use `vilemk-design`, `vilemk-check` and
 `vilemk-keypos` directly; those find the config repo on their own, from any
 directory.
 
@@ -343,6 +352,25 @@ directory.
 Saved copies of a keymap, never built. See
 [variants/README.md](variants/README.md). Each one is a folder holding the
 keymap and the `build.yaml` that builds it.
+
+## Sharing a layout
+
+Sharing means sharing the `.keymap`. **Export keymap**, above the board, writes
+the variant's own file with one extra comment line in it: a JSON manifest of the
+VileDances, macros, combos and layer entries the keymap uses. The file still
+compiles for someone who has never heard of VileMK, and the comment is what lets
+someone who has restore the records behind the generated behaviors.
+
+**Import a .keymap** in the sidebar takes one back, or you can drop the file on
+the sidebar. It refuses a keymap for a keyboard you have not added, since
+without the physical layout there is nothing to draw. Where an incoming record
+has the same name as one of yours but different contents, it asks: rename the
+incoming one (every reference in the keymap is rewritten to match) or keep
+yours. Your own records are never overwritten. What it writes is a new variant,
+and it runs the same checks `make check` does before handing it back.
+
+**Copy image**, **Save PNG** and **Save SVG** are beside Export, for pasting a
+layout into a chat. They carry whichever theme you are looking at.
 
 ## Putting a variant on the keyboard
 

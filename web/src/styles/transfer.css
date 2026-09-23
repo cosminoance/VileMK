@@ -1,0 +1,50 @@
+/* Export buttons, the export dialog, the sidebar's import target, and the
+   import dialog. */
+aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
+.impbtn{display:block;width:100%;margin:0 0 10px;text-align:center}
+
+.modal{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.45);
+  display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;
+  overflow:auto}
+.sheet{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:18px 20px;width:min(760px,100%)}
+.sheet h2{margin:0;font-size:17px}
+.sheet .bar{margin-bottom:10px}
+
+.ilist{list-style:none;margin:12px 0;padding:0;display:flex;flex-direction:column;
+  gap:6px}
+.irow{border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.irow.clash{display:block;border-color:var(--diff);background:var(--diff-soft)}
+.irow.clash .bar{margin:0}
+.irow .nm{font-size:13px;font-weight:600}
+.irow .tgl{width:auto;padding:3px 10px}
+
+.cmp{display:flex;gap:12px;margin-top:8px}
+.cmp > div{flex:1;min-width:0}
+.cmp h4{margin:0 0 4px;font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted)}
+.cmp pre{margin:0;padding:8px;border-radius:6px;background:var(--bg);
+  border:1px solid var(--line);font-size:11px;white-space:pre-wrap;
+  word-break:break-word}
+
+/* A sidebar row is a name that selects plus the export handle. The handle is
+   quiet until the row is hovered, focused or selected: it is one control per
+   keyboard in a list that is mostly read. */
+aside .kbrow{display:flex;align-items:center;gap:2px}
+aside .kbrow > button{flex:1;min-width:0}
+aside .kbrow .xbtn{flex:none;width:26px;padding:6px 0;text-align:center;
+  color:var(--muted);font-size:14px;opacity:0}
+aside .kbrow:hover .xbtn,aside .kbrow:focus-within .xbtn,
+aside .kbrow.sel .xbtn{opacity:1}
+aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
+
+/* The export dialog's layer list, two or three columns rather than one long
+   ladder: a 10-layer keymap should not push the buttons off the sheet. */
+.xlayers{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px;
+  grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.xlayers .toggle{display:block;font-size:12px}
+/* The boards the export serialises. Laid out and styled like the real one,
+   just nowhere the user can see: `display:none` would leave them unstyled. */
+.offscreen{position:absolute;left:-99999px;top:0;width:4000px;
+  pointer-events:none}
