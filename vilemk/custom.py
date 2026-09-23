@@ -45,6 +45,7 @@ import os
 import re
 
 from . import PROJECT_DIR, keymap
+from .check import DISPLAY_SHIELD_RE, _conf_turns_off, _defconfig_turns_on
 CUSTOM_DIR = os.path.join(PROJECT_DIR, "custom")
 DIRS = {"viledance": os.path.join(CUSTOM_DIR, "viledance"),
         "combo": os.path.join(CUSTOM_DIR, "combo"),
@@ -1171,6 +1172,63 @@ def _is_central(entry) -> bool:
     return half in (None, "left")
 
 
+# Parts: the shields a vendor adds to a half on top of the keyboard itself
+# (`nice_view` on `eyelash_sofle_left`). The vendor ships one build list for every
+# way the keyboard is sold, so it lists them all; which ones a given keyboard
+# actually has is the user's answer, ticked in the variant bar and passed in as
+# `parts`. A screen dropped from a board whose defconfig turns the display on
+# needs the display switched off too, or the build fails on the missing
+# `zephyr,display` node.
+DISPLAY_OFF_FLAG = "-DCONFIG_ZMK_DISPLAY=n"
+DISPLAY_FLAG_RE = re.compile(r"\s*-DCONFIG_ZMK_DISPLAY=\S*")
+
+
+def _slot(keyboard: str, entry) -> str:
+    """The name that says which half an entry builds: the board for a keyboard
+    that is its own board, the keyboard shield for one on a generic controller."""
+    for n in [entry.board] + entry.shields:
+        if n and (n == keyboard or keymap.split_half(n)[0] == keyboard):
+            return n
+    return entry.board
+
+
+def _vendor_parts(keyboard: str, zmk_dir: str):
+    """-> {slot: [shield, ...]}, the add-ons on the vendor's plain entries."""
+    out = {}
+    for v in _entries_for(keyboard, keymap.vendor_build_entries(zmk_dir)):
+        if v.get("snippet") or v.get("artifact-name"):
+            continue
+        slot = _slot(keyboard, v)
+        extra = [sh for sh in v.shields if sh != slot and sh not in out.get(slot, [])]
+        out.setdefault(slot, []).extend(extra)
+    return {k: v for k, v in out.items() if v}
+
+
+def part_id(slot: str, shield: str) -> str:
+    return f"{slot}:{shield}"
+
+
+def parts_for(keyboard: str, zmk_dir: str = ".zmk", build_path: str = ""):
+    """The parts the page offers for `keyboard`, each ticked as the current build
+    list has it: the variant's own `build_path` when there is one, else the
+    repo's build list, else the vendor's (everything on)."""
+    vendor = _vendor_parts(keyboard, zmk_dir)
+    if not vendor:
+        return []
+    source = []
+    for path in (build_path, keymap.find_build_yaml()):
+        if path and os.path.isfile(path):
+            source = [e for e in _entries_for(
+                          keyboard, keymap.parse_build_yaml(keymap.read_text(path)))
+                      if RESET_SHIELD not in e.shields]
+            if source:
+                break
+    have = {part_id(_slot(keyboard, e), sh) for e in source for sh in e.shields}
+    return [{"id": part_id(slot, sh), "slot": slot, "shield": sh,
+             "on": not source or part_id(slot, sh) in have}
+            for slot, shields in vendor.items() for sh in shields]
+
+
 def _add_flags(cmake_args: str, flags) -> str:
     """Append each flag whose symbol the args do not already set."""
     for f in flags:
@@ -1235,7 +1293,7 @@ def _with_keymap_file(cmake_args: str, keymap_rel: str) -> str:
 
 
 def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
-                   keymap_text: str = "", reset: bool = False):
+                   keymap_text: str = "", reset: bool = False, parts=None):
     """-> (build.yaml text, warnings) for one keyboard and one keymap.
 
     Reads the config repo, so the caller must already be `chdir`-ed into it -
@@ -1249,6 +1307,10 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
     off by default because it doubles the artifacts, and on by default in the
     page for a keymap that binds `&studio_unlock` - the keyboards that can end up
     with a stored keymap overriding this one are exactly those.
+
+    `parts` is `{part_id: bool}` for the add-on shields the vendor lists
+    (`parts_for()`): ticked ones are kept or added, unticked ones dropped. None
+    keeps the source entries' shields as they are.
     """
     keymap_rel = f"config/{keymap_name}"
     warnings, source = [], ""
@@ -1310,12 +1372,34 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
             body += _reset_body([keyboard])
         return _build_yaml_text(keyboard, keymap_name, head, body), warnings
 
+    vendor_parts = _vendor_parts(keyboard, zmk_dir)
     seen, body = set(), []
     for e in picked:
         central = _is_central(e)
+        slot = _slot(keyboard, e)
+        offered = vendor_parts.get(slot, [])
+        shields = list(e.shields)
+        if parts is not None:
+            shields = [sh for sh in shields
+                       if sh not in offered or parts.get(part_id(slot, sh), True)]
+            shields += [sh for sh in offered
+                        if parts.get(part_id(slot, sh)) and sh not in shields]
+        # A screen the vendor offers and this half does not get: switch the
+        # display off, unless the board never turned it on or a conf already did.
+        dropped_screen = any(DISPLAY_SHIELD_RE.search(sh) for sh in offered
+                             if sh not in shields)
+        has_screen = any(DISPLAY_SHIELD_RE.search(sh) for sh in shields)
+        display_off = (dropped_screen and not has_screen
+                       and _defconfig_turns_on(zmk_dir, e.board, "CONFIG_ZMK_DISPLAY")
+                       and not _conf_turns_off(e.board, "CONFIG_ZMK_DISPLAY"))
+        if display_off and parts is None:
+            note = (f"`{slot}` has no screen shield but its defconfig turns the "
+                    f"display on, so its entry carries {DISPLAY_OFF_FLAG}")
+            if note not in warnings:
+                warnings.append(note)
         lines = []
         for key in BUILD_YAML_KEYS:
-            value = e.get(key)
+            value = " ".join(shields) if key == "shield" else e.get(key)
             if key == "snippet" and studio and central:
                 if value and value != STUDIO_SNIPPET:
                     warnings.append(
@@ -1327,9 +1411,14 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
                 lines.append(f"{'  - ' if not lines else '    '}{key}: {value}")
         if not lines:
             continue
-        args = _add_flags(e.get("cmake-args") or "",
+        args = e.get("cmake-args") or ""
+        if parts is not None:
+            # the ticked parts decide the display, not a flag left over from before
+            args = DISPLAY_FLAG_RE.sub("", args).strip()
+        args = _add_flags(args,
                           feature_flags
-                          + ([STUDIO_FLAG] if studio and central else []))
+                          + ([STUDIO_FLAG] if studio and central else [])
+                          + ([DISPLAY_OFF_FLAG] if display_off else []))
         lines.append(f"    cmake-args: {_with_keymap_file(args, keymap_rel)}")
         block = "\n".join(lines)
         if block not in seen:            # the same half twice is one entry
@@ -1396,15 +1485,15 @@ def delete_variant(name: str) -> bool:
 
 
 def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk",
-                  reset: bool = False):
+                  reset: bool = False, parts=None):
     """Write `variants/<name>/` - the keymap, and the build list that builds it.
 
     -> (keymap path, build.yaml path or "", warnings). The build list is skipped
     only when we were not told which keyboard this is; the keymap is always
     written, since it is the thing the user asked for.
 
-    `reset` adds the `settings_reset` entries to that build list - see
-    `build_yaml_for()`.
+    `reset` adds the `settings_reset` entries to that build list, and `parts`
+    picks its add-on shields - see `build_yaml_for()`.
     """
     p = variant_path(name)
     os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -1424,7 +1513,8 @@ def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk
     build_path = ""
     if keyboard:
         yaml_text, yaml_warnings = build_yaml_for(
-            keyboard, os.path.basename(p), zmk_dir, keymap_text=text, reset=reset)
+            keyboard, os.path.basename(p), zmk_dir, keymap_text=text, reset=reset,
+            parts=parts)
         build_path = os.path.join(os.path.dirname(p), "build.yaml")
         with open(build_path, "w", encoding="utf-8") as fh:
             fh.write(yaml_text)

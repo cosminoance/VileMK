@@ -17,6 +17,10 @@ import type { Importing } from "../lib/transfer";
 // can end up ignoring the compiled keymap at the positions Studio wrote.
 // Ticking or unticking the box pins it for the session.
 //
+// `parts` holds the add-on shields ticked in the variant bar, per keymap id and
+// part id. A part not in it falls back to `km.parts[].on`, which the server read
+// from the build list that builds this keymap now.
+//
 // `activeField` names the input the menu fills - the field's key, not the
 // element, so its value is read back out of the draft it belongs to. `null`
 // means nothing has been clicked yet, which `activeFieldOf()` resolves to the
@@ -52,6 +56,7 @@ export interface State {
   ptab: string;
   newLayers: Record<string, { name: string }[]>;
   reset: boolean | null;
+  parts: Record<string, Record<string, boolean>>;
 
   activeField: string | null;
   keyVal: string;
@@ -69,7 +74,7 @@ export const initialState = (data: any): State => ({
   layer: 0, layout: 0, base: "", nums: true, hot: null,
   emode: null, drafts: {}, assign: {}, msg: null, dts: null,
   editing: null, picker: true, ptab: "keyboard",
-  newLayers: {}, reset: null,
+  newLayers: {}, reset: null, parts: {},
   activeField: null, keyVal: "",
   imp: null,
 });
@@ -93,6 +98,7 @@ export type Action =
   | { t: "picker"; on: boolean }
   | { t: "ptab"; tab: string }
   | { t: "reset"; on: boolean }
+  | { t: "part"; kmId: string; id: string; on: boolean }
   | { t: "field"; key: string | null }
   | { t: "keyVal"; v: string }
   | { t: "editKey"; pos: number; ptab: string; cur: string }
@@ -131,6 +137,9 @@ export function reducer(s: State, a: Action): State {
     case "picker": return { ...s, picker: a.on };
     case "ptab": return { ...s, ptab: a.tab };
     case "reset": return { ...s, reset: a.on };
+    case "part":
+      return { ...s, parts: { ...s.parts,
+                              [a.kmId]: { ...s.parts[a.kmId], [a.id]: a.on } } };
     case "field": return { ...s, activeField: a.key };
     case "keyVal": return { ...s, keyVal: a.v };
 

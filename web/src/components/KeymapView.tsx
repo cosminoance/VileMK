@@ -9,6 +9,7 @@ import { KeyEditor } from "./KeyEditor";
 import { Menu } from "./Menu";
 import { Panel } from "./Panels";
 import { Tables } from "./Tables";
+import { Toggle } from "./Toggle";
 import { ExportBar } from "./Transfer";
 import { VariantBar } from "./VariantBar";
 
@@ -86,11 +87,9 @@ export function KeymapView() {
             <option key={k.id} value={k.id}>{k.kind}: {k.path}</option>
           ))}
         </select>
-        <label className="toggle">
-          <input type="checkbox" checked={s.nums}
-                 onChange={(e) => d({ t: "nums", on: e.target.checked })} />
-          {" "}key positions
-        </label>
+        <Toggle checked={s.nums} onChange={(on) => d({ t: "nums", on })}>
+          key positions
+        </Toggle>
         <ExportBar km={km} />
       </div>
 

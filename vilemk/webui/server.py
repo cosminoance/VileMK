@@ -24,7 +24,8 @@ Endpoints:
     DELETE /api/layer/<name>      remove one
     POST   /api/preview           devicetree for an unsaved item
     POST   /api/variant           write variants/<name>/ (keymap + build.yaml;
-                                  `reset: true` adds the settings_reset entries)
+                                  `reset: true` adds the settings_reset entries,
+                                  `parts` picks the add-on shields)
     DELETE /api/variant/<name>    remove variants/<name>/
     POST   /api/import/inspect    read a shared keymap, report record collisions
     POST   /api/import            restore its records, then write variants/<name>/
@@ -131,6 +132,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/state":
             data = keymap.collect_data(Args(REPO))
             data["custom"] = custom.load_everything()
+            for km in data["keymaps"]:
+                km["parts"] = _parts(km)
             data["repo_path"] = REPO
             data["repo_found_via"] = HOW
             # `live` is what makes the write controls render at all.
@@ -341,7 +344,8 @@ class Handler(BaseHTTPRequestHandler):
                 text = header + text
             path, build_path, notes = custom.write_variant(
                 name, text, keyboard=km.get("keyboard") or "",
-                zmk_dir=Args(REPO).zmk, reset=bool(rec.get("reset")))
+                zmk_dir=Args(REPO).zmk, reset=bool(rec.get("reset")),
+                parts=_parts_choice(rec.get("parts")))
         except (custom.EmitError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"wrote": _rel(path),
@@ -537,6 +541,23 @@ def _rel(path: str) -> str:
     """Paths go back to the page relative to the VileMK checkout, never absolute
     - the page prints them, and an absolute path is noise plus a small leak."""
     return os.path.relpath(path, custom.PROJECT_DIR) if path else ""
+
+
+def _parts(km) -> list:
+    """The add-on shields the variant bar offers for this keymap's keyboard,
+    ticked from the variant's own build.yaml when it has one."""
+    if not km.get("keyboard"):
+        return []
+    own = (os.path.join(os.path.dirname(km["path"]), "build.yaml")
+           if km["kind"] == "variant" else "")
+    return custom.parts_for(km["keyboard"], Args(REPO).zmk, own)
+
+
+def _parts_choice(raw):
+    """`{part_id: bool}` from the page, or None to keep the source shields."""
+    if not isinstance(raw, dict):
+        return None
+    return {str(k): bool(v) for k, v in raw.items()}
 
 
 # ------------------------------------------------------------------- scopes

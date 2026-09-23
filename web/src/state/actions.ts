@@ -81,8 +81,11 @@ export async function previewBinding(d: D, kind: string, rec: any): Promise<stri
 // so combos switched on while composing land in the file (see ui-server.md).
 // `reset` adds a `settings_reset` entry per board to the build.yaml. See the
 // "include reset" box in the variant bar, and `_reset_body()` in custom.py.
+// `parts` is `{part_id: bool}` for the add-on shields; the build.yaml keeps the
+// ticked ones (`build_yaml_for(parts=)`).
 export async function saveVariant(
   s: State, d: D, km: any, over: string | null, typed: string, reset: boolean,
+  parts: Record<string, boolean>,
 ) {
   const name = over || typed.trim();
   if (!name)
@@ -94,7 +97,7 @@ export async function saveVariant(
   try {
     const r = await api("POST", "/api/variant",
                         { name, base: km.id, assignments: s.assign,
-                          scope: scopeOf(km), reset: !!reset,
+                          scope: scopeOf(km), reset: !!reset, parts,
                           new_layers: s.newLayers[km.id] || [] });
     // Pull the fresh keymap list so the new file shows up in "Saved variations"
     // without a page reload, and jump straight to it - matching by filename

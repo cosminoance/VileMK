@@ -17,6 +17,7 @@ import { slugify } from "../lib/keymaps";
 import { layersOf, type Layer } from "../lib/layers";
 import { useStore } from "../state/store";
 import { Board } from "./Board";
+import { Toggle } from "./Toggle";
 
 const caption = (l: Layer, i: number) =>
   `${i} · ${l.display}${l.reserved ? " (reserved)" : ""}`;
@@ -102,21 +103,15 @@ function ExportDialog({ km, close }: { km: any; close: () => void }) {
         <ul className="xlayers">
           {layers.map((l, i) => (
             <li key={i}>
-              <label className="toggle">
-                <input type="checkbox" checked={chosen.includes(i)}
-                       onChange={() => toggle(i)} />
-                {" "}{caption(l, i)}
-              </label>
+              <Toggle checked={chosen.includes(i)} onChange={() => toggle(i)}>
+                {caption(l, i)}
+              </Toggle>
             </li>
           ))}
         </ul>
 
         <div className="bar">
-          <label className="toggle">
-            <input type="checkbox" checked={nums}
-                   onChange={(e) => setNums(e.target.checked)} />
-            {" "}key positions
-          </label>
+          <Toggle checked={nums} onChange={setNums}>key positions</Toggle>
         </div>
 
         <div className="rowbtns">

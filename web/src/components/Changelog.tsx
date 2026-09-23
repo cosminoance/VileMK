@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import ver from "../../../version/version.json";
+import { QMark } from "./Help";
 
 // The notes live in changelog/x.y.z.md at the repo root, one file per version,
 // hand-written in the pull request that ships them. They are bundled here
@@ -27,7 +28,7 @@ export function VersionChip() {
   return <>
     <button className="verchip" onClick={() => setOpen(true)}
             title="what changed">
-      v{ver.version}<span className="q">?</span>
+      v{ver.version}<QMark />
     </button>
     {open && <ChangelogSheet close={() => setOpen(false)} />}
   </>;

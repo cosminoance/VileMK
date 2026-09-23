@@ -66,9 +66,17 @@ header .ident{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
   color:var(--muted);font:11px/1 inherit;letter-spacing:.02em;
   display:inline-flex;align-items:center;gap:5px}
 .verchip:hover{color:var(--accent);text-decoration:underline}
-.verchip .q{display:inline-flex;align-items:center;justify-content:center;
+.q{display:inline-flex;align-items:center;justify-content:center;
   width:13px;height:13px;border-radius:50%;border:1px solid currentColor;
   font-size:9px;line-height:1;text-decoration:none}
+/* A `?` that explains the control beside it, on hover or keyboard focus. */
+.qhelp{position:relative;display:inline-flex;color:var(--muted);cursor:help}
+.qhelp:hover,.qhelp:focus-visible{color:var(--accent);outline:none}
+.qhelp .tip{display:none;position:absolute;top:calc(100% + 6px);right:-8px;z-index:6;
+  width:300px;max-width:80vw;padding:8px 10px;border:1px solid var(--line);
+  border-radius:6px;background:var(--panel);color:var(--ink);
+  font-size:12px;line-height:1.45;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+.qhelp:hover .tip,.qhelp:focus .tip{display:block}
 
 .clog{max-height:60vh;overflow:auto;margin:12px 0}
 .clog section{padding:0 0 10px;border-bottom:1px solid var(--line)}
