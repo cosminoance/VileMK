@@ -93,7 +93,7 @@ export interface BoardProps {
   editing: number | null;
   /** Null when the page is read-only: no key is clickable. */
   onKey: ((pos: number) => void) | null;
-  /** Held by the view above, which exports the board as an image. */
+  /** Taken by the export dialog, which serialises the board it renders. */
   svgRef?: RefObject<SVGSVGElement | null>;
 }
 

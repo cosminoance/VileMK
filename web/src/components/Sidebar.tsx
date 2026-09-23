@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { openImport } from "../state/actions";
 import { LIVE, useStore } from "../state/store";
+import { ExportButton } from "./Export";
 import { ImportButton } from "./Transfer";
 
 const KINDS: Record<string, string> = {
@@ -43,11 +44,17 @@ export function Sidebar() {
           ? groups.map((g) => (
               <div key={g.kind}>
                 <div className="group">{KINDS[g.kind]}</div>
+                {/* The row is a pair: the name selects, the ⤓ beside it
+                    exports that keymap as a picture without opening it. */}
                 {g.rows.map((k: any) => (
-                  <button key={k.id} className={k.id === s.id ? "sel" : ""}
-                          onClick={() => d({ t: "select", id: k.id })}>
-                    {k.name}<small>{k.path}</small>
-                  </button>
+                  <div key={k.id}
+                       className={"kbrow" + (k.id === s.id ? " sel" : "")}>
+                    <button className={k.id === s.id ? "sel" : ""}
+                            onClick={() => d({ t: "select", id: k.id })}>
+                      {k.name}<small>{k.path}</small>
+                    </button>
+                    <ExportButton km={k} />
+                  </div>
                 ))}
               </div>
             ))

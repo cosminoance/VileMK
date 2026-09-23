@@ -1,43 +1,16 @@
-import { useRef, useState, type RefObject } from "react";
+import { useRef, useState } from "react";
 
-import { saveFile } from "../lib/download";
-import { boardPng, boardSvgBlob, copyBoard } from "../lib/image";
 import { rowKey, summarise, unresolved, type ImportRow } from "../lib/transfer";
 import { exportVariant, openImport, runImport } from "../state/actions";
 import { useStore } from "../state/store";
 
-export function ExportBar({ km, board }:
-    { km: any; board: RefObject<SVGSVGElement | null> }) {
-  const { s, d } = useStore();
-  const stem = `${km.name}-layer${s.layer}`;
-  const msg = (text: string, bad?: boolean) => d({ t: "msg", msg: { text, bad } });
-
-  const withBoard = (fn: (svg: SVGSVGElement) => Promise<void>) => async () => {
-    if (!board.current) return msg("nothing on the board to export", true);
-    try { await fn(board.current); } catch (e) { msg((e as Error).message, true); }
-  };
-
-  return <>
-    {km.kind === "variant" &&
-      <button className="ghost" onClick={() => exportVariant(d, km)}>
-        Export keymap
-      </button>}
-    <button className="ghost" onClick={withBoard(async (svg) => {
-      await copyBoard(svg);
-      msg("board copied as a PNG");
-    })}>Copy image</button>
-    <button className="ghost" onClick={withBoard(async (svg) => {
-      const png = await boardPng(svg);
-      if (await saveFile(`${stem}.png`, png,
-          [{ description: "PNG image", accept: { "image/png": [".png"] } }]))
-        msg(`saved ${stem}.png`);
-    })}>Save PNG</button>
-    <button className="ghost" onClick={withBoard(async (svg) => {
-      if (await saveFile(`${stem}.svg`, boardSvgBlob(svg),
-          [{ description: "SVG image", accept: { "image/svg+xml": [".svg"] } }]))
-        msg(`saved ${stem}.svg`);
-    })}>Save SVG</button>
-  </>;
+export function ExportBar({ km }: { km: any }) {
+  const { d } = useStore();
+  if (km.kind !== "variant") return null;
+  // A config or vendor keymap is a file the user already has.
+  return <button className="ghost" onClick={() => exportVariant(d, km)}>
+    Export keymap
+  </button>;
 }
 
 export function ImportButton() {
