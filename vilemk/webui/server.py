@@ -10,7 +10,7 @@ standard library, bound to loopback, with a handful of JSON endpoints over the
 
 Endpoints:
     GET    /...                   the app from `dist/` (see below)
-    GET    /api/state             keymaps + custom items + project path
+    GET    /api/state             keymaps + custom items + project path + ZMK source
     GET    /api/export/<name>     one variant's keymap, records manifest embedded
     POST   /api/viledance         save one (JSON body, `name` required)
     POST   /api/macro             save one (a list of steps)
@@ -28,7 +28,14 @@ Endpoints:
                                   `parts` picks the add-on shields)
     DELETE /api/variant/<name>    remove variants/<name>/
     POST   /api/import/inspect    read a shared keymap, report record collisions
+                                  and, for a keyboard not added here, the module
+                                  its `// zmk-module:` line names
     POST   /api/import            restore its records, then write variants/<name>/
+    POST   /api/zmk               fetch ZMK's board data at {url, ref} and pin it
+    POST   /api/build             start building one variant ({name})
+    GET    /api/build?since=N     the build's state and its log from line N
+                                  (`variant=` names whose targets and files to list)
+    DELETE /api/build             cancel the running build
 
 The page is the React app under `dist/`, which is not in the repo - `make web`
 writes it, and the static route says so when it is missing.
@@ -37,16 +44,19 @@ writes it, and the static route says so when it is missing.
 from __future__ import annotations
 
 import argparse
+import atexit
 import errno
 import json
 import mimetypes
 import os
 import posixpath
+import re
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
-from .. import PROJECT_DIR, check, custom, keymap, keypos
+from .. import PROJECT_DIR, check, custom, firmware, keymap, keypos, workspace
 
 EMIT = {"viledance": custom.emit_viledance, "combo": custom.emit_combo,
         "modifier": custom.emit_modifier, "layer": custom.emit_layer,
@@ -127,13 +137,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._guard():
             return
-        self.path = self.path.split("?", 1)[0].split("#", 1)[0]
+        self.path, _, query = self.path.split("#", 1)[0].partition("?")
+        if self.path == "/api/build":
+            return self._build_status(parse_qs(query))
         if self.path == "/api/state":
             data = keymap.collect_data(Args())
             data["custom"] = custom.load_everything()
             for km in data["keymaps"]:
                 km["parts"] = _parts(km)
             data["repo_path"] = PROJECT_DIR
+            data["zmk"] = workspace.zmk_info()
+            data["build"] = firmware.docker_status()
             # `live` is what makes the write controls render at all.
             data["live"] = True
             return self._send(200, data)
@@ -218,6 +232,7 @@ class Handler(BaseHTTPRequestHandler):
         text = custom.with_manifest(text, store["viledance"], store["combo"],
                                     store["layer"], store["macro"],
                                     scope=custom.scope_key("variant", name))
+        text = _with_module_line(text)
         return self._send(200, {"name": custom.variant_slug(name),
                                 "filename": os.path.basename(path),
                                 "text": text})
@@ -265,11 +280,25 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/import":
             return self._import(rec)
 
+        if self.path == "/api/zmk":
+            return self._zmk(rec)
+
+        if self.path == "/api/build":
+            try:
+                firmware.JOB.start(str(rec.get("name") or ""))
+            except firmware.Busy as exc:
+                return self._send(409, {"error": str(exc)})
+            except (firmware.BuildError, ValueError, OSError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(202, firmware.JOB.since(0))
+
         self._send(404, {"error": "not found"})
 
     def do_DELETE(self):
         if not self._guard():
             return
+        if self.path == "/api/build":
+            return self._send(200, {"cancelled": firmware.JOB.cancel()})
         parts = self.path.strip("/").split("/")
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "variant":
             try:
@@ -352,6 +381,45 @@ class Handler(BaseHTTPRequestHandler):
                                 "warnings": errors + notes,
                                 "custom": custom.load_everything()})
 
+    # ------------------------------------------------------------------ zmk
+    def _zmk(self, rec):
+        """Resolve ZMK's ref, fetch its board data and pin the commit in west.yml.
+
+        Blocks for the download (a few seconds); the server is threaded, and a
+        second fetch while one runs is a 409.
+        """
+        try:
+            r = workspace.install_zmk(str(rec.get("url") or ""), str(rec.get("ref") or ""))
+        except workspace.Busy as exc:
+            return self._send(409, {"error": str(exc)})
+        except workspace.WorkspaceError as exc:
+            return self._send(400, {"error": str(exc)})
+        return self._send(200, {"was": r["was"], "files": r["files"],
+                                "zmk": workspace.zmk_info()})
+
+    # ---------------------------------------------------------------- build
+    def _build_status(self, q):
+        """The job, plus what `variant` would build and has built.
+
+        The page polls this once a second while a build runs. `variant` is the
+        one the sheet is open for, which need not be the one running.
+        """
+        try:
+            since = int((q.get("since") or ["0"])[0])
+        except ValueError:
+            since = 0
+        out = firmware.JOB.since(since)
+        name = (q.get("variant") or [""])[0]
+        if name:
+            try:
+                out["targets"] = [t["artifact"] for t in firmware.targets(name)]
+            except (firmware.BuildError, ValueError) as exc:
+                out["targets"], out["problem"] = [], str(exc)
+            out["files"] = firmware.firmware_files(name)
+            out["folder"] = _rel(firmware.firmware_dir(name))
+            out["docker"] = firmware.docker_status()
+        return self._send(200, out)
+
     # --------------------------------------------------------------- import
     def _import_inspect(self, rec):
         """What importing this file would mean, before anything is written."""
@@ -363,6 +431,7 @@ class Handler(BaseHTTPRequestHandler):
         suggested = custom.slug(stem or board or "imported") or "imported"
         return self._send(200, {
             "board": board, "known": known,
+            "module": None if known else _wanted_module(text),
             "name": suggested,
             "taken": os.path.isdir(custom.variant_dir(suggested))
                      if custom.NAME_RE.match(suggested) else False,
@@ -473,6 +542,68 @@ def _resolve_board(text: str, filename: str):
         if ls or ts:
             return n, True
     return (names[0] if names else ""), False
+
+
+# The recipient of a shared keymap may not have its keyboard. The layout comes
+# from a module in config/west.yml, so export names that module and import tells
+# the recipient which one to add. A board built into ZMK or defined in config/
+# gets no line: the first every project has, the second nobody else can fetch.
+MODULE_HINT_RE = re.compile(r"(?im)^\s*//\s*zmk-module\s*:\s*(\S+)[ \t]+(\S+)(?:[ \t]+(\S+))?")
+
+
+def _board_module(board: str):
+    """{name, url, ref} of the west.yml module `board`'s layout is in, or None."""
+    if not board:
+        return None
+    args = Args()
+    roots = keypos.search_roots(args.root, args.zmk)
+    layouts, transforms, chosen = keypos.collect(roots)
+    ls, ts = keypos.candidates_for(board, roots, layouts, transforms, chosen)
+    mods = os.path.realpath(os.path.join(args.zmk, "modules"))
+    for obj in ls + ts:
+        src = os.path.realpath(obj.source)
+        if not src.startswith(mods + os.sep):
+            continue
+        name = os.path.relpath(src, mods).split(os.sep)[0]
+        try:
+            data = workspace.west_yml_read()
+        except (workspace.WorkspaceError, OSError):
+            data = None
+        if data and workspace.project(data, name) is not None:
+            info = workspace.project_info(data, name)
+            return {"name": name, "url": info["url"], "ref": info["ref"]}
+        return {"name": name, "url": "", "ref": ""}
+    return None
+
+
+def _with_module_line(text: str) -> str:
+    """`text` with `// zmk-module: <name> <url> <ref>` under its keyboard line."""
+    if MODULE_HINT_RE.search(text):
+        return text
+    m = keypos.KEYBOARD_HINT_RE.search(text)
+    mod = _board_module(m.group(1)) if m else None
+    if not mod or not mod["url"]:
+        return text
+    line = f"// zmk-module: {mod['name']} {mod['url']} {mod['ref']}".rstrip() + "\n"
+    at = text.find("\n", m.end())
+    at = len(text) if at == -1 else at + 1
+    return text[:at] + line + text[at:]
+
+
+def _wanted_module(text: str):
+    """What the file says its keyboard needs, against this project's west.yml."""
+    m = MODULE_HINT_RE.search(text or "")
+    if not m or not workspace.NAME_RE.match(m.group(1)) or m.group(1) == "zmk":
+        return None
+    name, url, ref = m.group(1), m.group(2), m.group(3) or ""
+    if not url.startswith("https://"):
+        return None
+    try:
+        listed = workspace.project(workspace.west_yml_read(), name) is not None
+    except (workspace.WorkspaceError, OSError):
+        listed = False
+    fetched = os.path.isdir(os.path.join(Args().zmk, "modules", name))
+    return {"name": name, "url": url, "ref": ref, "listed": listed, "fetched": fetched}
 
 
 def _incoming(text: str):
@@ -660,6 +791,8 @@ def main() -> int:
 
     QUIET = args.quiet
     os.chdir(PROJECT_DIR)
+    # `docker run` outlives its client, so a build must not outlive the server.
+    atexit.register(firmware.JOB.cancel)
     print(f"# project: {PROJECT_DIR}")
     print(f"# store: {custom.CUSTOM_DIR}")
     return run(args.host, args.port, open_browser=not args.no_open)

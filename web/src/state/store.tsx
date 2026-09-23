@@ -57,6 +57,8 @@ export interface State {
   newLayers: Record<string, { name: string }[]>;
   reset: boolean | null;
   parts: Record<string, Record<string, boolean>>;
+  /** The build panel under the variant bar is open. */
+  build: boolean;
 
   activeField: string | null;
   keyVal: string;
@@ -74,7 +76,7 @@ export const initialState = (data: any): State => ({
   layer: 0, layout: 0, base: "", nums: true, hot: null,
   emode: null, drafts: {}, assign: {}, msg: null, dts: null,
   editing: null, picker: true, ptab: "keyboard",
-  newLayers: {}, reset: null, parts: {},
+  newLayers: {}, reset: null, parts: {}, build: false,
   activeField: null, keyVal: "",
   imp: null,
 });
@@ -99,6 +101,7 @@ export type Action =
   | { t: "ptab"; tab: string }
   | { t: "reset"; on: boolean }
   | { t: "part"; kmId: string; id: string; on: boolean }
+  | { t: "build"; on: boolean }
   | { t: "field"; key: string | null }
   | { t: "keyVal"; v: string }
   | { t: "editKey"; pos: number; ptab: string; cur: string }
@@ -140,6 +143,7 @@ export function reducer(s: State, a: Action): State {
     case "part":
       return { ...s, parts: { ...s.parts,
                               [a.kmId]: { ...s.parts[a.kmId], [a.id]: a.on } } };
+    case "build": return { ...s, build: a.on };
     case "field": return { ...s, activeField: a.key };
     case "keyVal": return { ...s, keyVal: a.v };
 

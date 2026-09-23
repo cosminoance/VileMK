@@ -1452,11 +1452,19 @@ def delete_variant(name: str) -> bool:
     version wrote. `variant_dir()` is what keeps this inside our own directory -
     `config/` is never written, let alone deleted from.
 
-    Only the two files a variant is made of are removed, and the folder only if
-    that empties it. Anything else you put in there is yours and survives.
+    Only the two files a variant is made of and the firmware built from them
+    are removed, and a folder only if that empties it. Anything else you put in
+    there is yours and survives.
     """
     gone = False
     folder = variant_dir(name)
+    fw = os.path.join(folder, "firmware")
+    if os.path.isdir(fw):
+        for fn in os.listdir(fw):
+            if fn.endswith((".uf2", ".bin")):
+                os.remove(os.path.join(fw, fn))
+        if not os.listdir(fw):
+            os.rmdir(fw)
     if os.path.isdir(folder):
         for fn in (os.path.basename(variant_path(name)), "build.yaml"):
             p = os.path.join(folder, fn)

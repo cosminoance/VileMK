@@ -20,7 +20,8 @@ documented, but not yet editable in the app; see
 The name is a nod to [Vial](https://get.vial.today/), the graphical keymap
 editor from the QMK world that inspired this project. Vial is a potion bottle;
 VileMK is vile, as in ruthless. There is no live USB protocol. You write
-devicetree and validate it locally before it reaches CI.
+devicetree, validate it locally, and build the firmware locally in ZMK's
+build container.
 
 ## Where things live
 
@@ -34,6 +35,18 @@ yours and gitignored:
 | `.zmk/` | board data fetched from ZMK and from keyboard modules |
 | `custom/` | the VileDances, macros, combos, modifiers and layers you design |
 | `variants/` | saved keymaps, each with the `build.yaml` that builds it |
+
+ZMK's board data comes from GitHub. In a fresh checkout, fetch it once:
+
+```bash
+make zmk
+```
+
+That downloads the parts of ZMK the app reads into `.zmk/zmk/` and records
+the exact commit in `config/west.yml`. The **ZMK** link under the logo opens
+the same thing as a settings sheet, with an **Update** button. Leave the
+repository and branch alone unless you know you need a different ZMK: every
+keyboard and variant is checked and built against it.
 
 Adding a keyboard from inside the app is not built yet. Until it is, a
 keyboard comes from an existing ZMK config repo: copy its `config/`,
@@ -65,9 +78,12 @@ make web
 Once `node_modules/` exists the build takes a few seconds. If you ever see a
 page saying the app is not built yet, that is the command it is asking for.
 
-Optionally, `pyproject.toml` installs the three tools as commands
-(`vilemk-keypos`, `vilemk-check`, `vilemk-design`), so they work
-from any directory:
+**Docker, optionally**, for building firmware; see
+[Building firmware](#building-firmware). Everything else works without it.
+
+Optionally, `pyproject.toml` installs the tools as commands
+(`vilemk-keypos`, `vilemk-check`, `vilemk-design`, `vilemk-workspace`,
+`vilemk-build`), so they work from any directory:
 
 ```bash
 uv tool install --editable .    # or: pip install -e .
@@ -78,7 +94,8 @@ uv tool install --editable .    # or: pip install -e .
 | Command | What it does |
 |---|---|
 | `python3 -m vilemk.keypos config/<board>.keymap` | Prints the key-position map for a keyboard: the numbers `key-positions` and `hold-trigger-key-positions` refer to. |
-| `python3 -m vilemk.check config/<board>.keymap` | Static validation before a CI round-trip: binding counts per layer, out-of-range positions, undefined `&labels`, bad keycodes, arity, braces. It also reads `build.yaml` and flags halves built from different keymaps, a `KEYMAP_FILE` that names nothing, a part the vendor builds that your entry leaves out, and colliding artifact names. Pass `--no-build-list` for keymaps only. |
+| `python3 -m vilemk.check config/<board>.keymap` | Static validation before a build: binding counts per layer, out-of-range positions, undefined `&labels`, bad keycodes, arity, braces. It also reads `build.yaml` and flags a `KEYMAP_FILE` left in it (the build adds one), a part the vendor builds that your entry leaves out, and colliding artifact names. Pass `--no-build-list` for keymaps only. |
+| `python3 -m vilemk.firmware <variant>` | Builds a variant's firmware in Docker into `variants/<variant>/firmware/`. `--dry-run` prints the command and script without running them. |
 | `python3 -m vilemk.webui.server` | The app: every keymap drawn on its real key positions, with layer tabs, combos and a compare view, plus the editor — design VileDances, macros, combos, modifiers and layer bindings in Vial-style panels, click keys to reassign them, save to `custom/` and `variants/`, and export or import a `.keymap`. |
 
 ### Designing a keymap: every tab in the app
@@ -297,6 +314,8 @@ make check    # validation only: build.yaml, then config/ and variants/
 make web      # build the UI (needs Node) into vilemk/webui/dist/
 make webdev   # the Vite dev server for it, with live reload
 make pos      # key-position maps
+make zmk      # fetch ZMK's board data and pin the commit
+make firmware ARGS=<variant>   # build a variant's firmware (needs Docker)
 make install  # put the vilemk-* commands on your PATH
 make clean
 ```
@@ -310,14 +329,14 @@ point it here:
 make -C ~/git/VileMK          # or: make -C ~/git/VileMK check
 ```
 
-Or run `make install` once and use `vilemk-design`, `vilemk-check` and
-`vilemk-keypos` directly, from any directory.
+Or run `make install` once and use the `vilemk-*` commands directly, from any
+directory.
 
 ## variants/
 
-Saved copies of a keymap, never built. See
-[variants/README.md](variants/README.md). Each one is a folder holding the
-keymap and the `build.yaml` that builds it.
+Saved copies of a keymap. See [variants/README.md](variants/README.md). Each
+one is a folder holding the keymap, the `build.yaml` that builds it, and after
+a build, `firmware/` with the `.uf2` files.
 
 ## Sharing a layout
 
@@ -329,7 +348,11 @@ someone who has restore the records behind the generated behaviors.
 
 **Import a .keymap** in the sidebar takes one back, or you can drop the file on
 the sidebar. It refuses a keymap for a keyboard you have not added, since
-without the physical layout there is nothing to draw. Where an incoming record
+without the physical layout there is nothing to draw. An exported keymap names
+the keyboard's module in a comment (`// zmk-module:`), so the refusal tells
+the recipient which module to add to `config/west.yml` and to fetch it with
+`make module ARGS=<name>`. The comment does not change how the file builds in
+a regular ZMK config repo. Where an incoming record
 has the same name as one of yours but different contents, it asks: rename the
 incoming one (every reference in the keymap is rewritten to match) or keep
 yours. Your own records are never overwritten. What it writes is a new variant,
@@ -338,247 +361,99 @@ and it runs the same checks `make check` does before handing it back.
 **Copy image**, **Save PNG** and **Save SVG** are beside Export, for pasting a
 layout into a chat. They carry whichever theme you are looking at.
 
-## Putting a variant on the keyboard
+## Building firmware
 
-**The short way.** The designer writes a variant as a folder with both files
-in it, so putting one on the keyboard is two copies and a push:
-
-```bash
-cp variants/<name>/<name>.keymap  /path/to/zmk-config/config/
-cp variants/<name>/build.yaml     /path/to/zmk-config/build.yaml
-make check          # keymap and build list, before the round trip
-```
-
-That generated `build.yaml` contains your repo's own entries for that
-keyboard with only the `KEYMAP_FILE` swapped, so a split keeps both halves
-and a `shield:` or `snippet:` survives. It also replaces everything else the
-repo built. To keep building the original keymap too, merge by hand using the
-rest of this section, giving each entry an `artifact-name:`.
-
-The rest of this section covers what that file does, and what to know when
-writing one by hand.
-
-Nothing in `variants/` is ever built. The config repo's `build.yaml` drives
-GitHub Actions, and ZMK picks a keymap by name: for each entry it looks in
-`config/` for a file named after the board or shield being built,
-`<board>.keymap` or `<shield>.keymap`. That is the file the `zmk` CLI
-installed. Leave it alone; add your variant beside it and tell the build to
-use the variant.
-
-**1. Copy the variant into the config repo's `config/` directory, under a
-name that matches no board and no shield.** The convention in `variants/`
-works here too: `<keyboard>-<what-it-is>.keymap`. The suffix keeps the file
-inert, since ZMK's name-based lookup will not pick it up on its own, so the
-keymap the CLI installed stays as it is, just no longer the one being built.
-
-The file has to live in the config repo. GitHub Actions only ever checks out
-that repo and has no idea VileMK exists.
-
-**2. Point the build at it.** In the config repo's `build.yaml`, give every
-entry for that keyboard a `cmake-args` line naming your file:
-
-```yaml
-include:
-  - board: <board>
-    cmake-args: -DKEYMAP_FILE="${GITHUB_WORKSPACE}/config/<your-variant>.keymap"
-```
-
-Entries that use a shield keep their `shield:` line; only `cmake-args` is
-added.
-
-`KEYMAP_FILE` is a ZMK build setting. It names the keymap outright, so the
-search by board name never runs. Write the path with `${GITHUB_WORKSPACE}` as
-above rather than as a relative path; the build does not always run from the
-directory you would expect.
-
-A split keyboard has one entry per half, and both need the line, pointing at
-the same file. The halves are two separate microcontrollers, each with its
-own firmware, built from the same single keymap file: one keymap, two `.uf2`
-files. Giving the two halves different keymaps produces a keyboard whose left
-side does not agree with its right.
-
-> **Watch `build.yaml` after every `zmk keyboard add`.** The CLI writes those
-> entries itself, and it writes them plain: no `cmake-args`, and for a split,
-> one entry per half. Anything it adds or re-adds is therefore back on the
-> name-based lookup and building the CLI's own keymap, not yours. After each
-> run, reopen `build.yaml` and put the line back on both halves, spelled
-> identically. It drops more than the keymap line; see "What else the CLI
-> leaves out" below.
-
-To keep building the original keymap as well, leave the existing entries
-alone and add extra ones carrying the `cmake-args`, each with an
-`artifact-name`, so the two builds' `.uf2` files do not collide inside
-`firmware.zip`.
-
-**3. Validate, then commit and push in the config repo.** The push triggers
-the build:
-
-```bash
-make check ARGS="<path to the copy you made in config/>"
-```
-
-That reads the keymap and `build.yaml`, so the line you just added is checked
-too: whether both halves carry it, whether it points at a file that is really
-there, and whether it is written as an absolute path.
-
-When the run finishes, download its `firmware.zip`. Put each half into its
-bootloader (on most boards, double-tapping reset mounts it as a USB drive)
-and copy the matching `.uf2` across.
-
-To go back to the original keymap, delete the `cmake-args` lines and push.
-The file the CLI installed was never touched, so the name-based lookup finds
-it again.
-
-### What else the CLI leaves out
-
-`zmk keyboard add` gives you a starting point. It writes the shortest thing
-that could work, the board name and nothing else, because it cannot know what
-you actually own.
-
-Most keyboards are more than a board. A screen, an encoder, or an add-on
-module is a separate part the build has to be told about, on the line for the
-half it is plugged into. The same keyboard is often sold in several versions
-(with a screen and without, one encoder or two), all built from one set of
-files by the same vendor. So there is no single correct build list the CLI
-could have written for you: there is the vendor's list, describing the
-versions they sell, and yours, describing the one on your desk. Reconciling
-the two is a step you do by hand, once, per keyboard.
-
-Skip it and the build either comes back missing a feature, or fails with a
-compiler error that says nothing about the missing line.
-
-**Where to look.** The vendor's own list ships with the keyboard's code,
-which the CLI downloaded into the config repo when you added the keyboard. In
-the config repo, open:
+A build is a variant. **Build firmware** in the variant bar (or
+`make firmware ARGS=<variant>`) compiles every entry in
+`variants/<variant>/build.yaml` and writes the results beside the keymap:
 
 ```
-.zmk/modules/<keyboard-module>/build.yaml
+variants/<variant>/firmware/eyelash_sofle_left-zmk.uf2
+variants/<variant>/firmware/eyelash_sofle_right-zmk.uf2
 ```
 
-`<keyboard-module>` is the folder named after your keyboard; for an Eyelash
-Sofle, `.zmk/modules/zmk-eyelash-sofle`. Nothing under `.zmk/` is yours, it is
-a downloaded copy, so read it and never edit it: the next fetch overwrites it.
-If the folder is not there yet, the same file is on the keyboard's GitHub
-page, at the top level of the repository `config/west.yml` names.
+To build less, change the variant: the **has** and **include reset** boxes
+decide what its `build.yaml` holds. The firmware folder is replaced only when
+every entry built; a failed or cancelled build leaves the previous files.
 
-Put that file beside your own `config/build.yaml` and compare them entry by
-entry. For each half, the vendor's file may carry lines yours does not:
+To flash, put the keyboard into its bootloader (on most boards, double-tap
+reset and it mounts as a USB drive) and copy its `.uf2` across. A split
+keyboard has one file per half, and each half is flashed with its own. A
+board that produces a `.bin` instead has no drive to copy to; flash it with
+the board's own tool.
 
-| line | what it means |
-|---|---|
-| `shield:` | an extra part on that half, most often a screen. Missing it is what makes a build fail on a keyboard that has a display. |
-| `snippet:` | an optional build mode, like the one that enables ZMK Studio |
-| `cmake-args:` | build settings; yours already has one naming your keymap |
-| `artifact-name:` | a label so two `.uf2` files in the same download do not collide |
+**It needs Docker.** The build runs in `zmkfirmware/zmk-build-arm:stable`,
+the image ZMK's own GitHub workflow uses, against the ZMK commit pinned in
+`config/west.yml`. Your user has to be able to run `docker` without sudo
+(on Linux, be in the `docker` group). Without Docker the button is off and
+says why; designing, checking and export all work as before.
 
-**What to copy: the `shield:` lines, for the parts you actually have.** Take
-them exactly as spelled, onto the half they belong to. Leave your own
-`cmake-args` line where it is and add the shield beside it:
+**The first build is slow**: it pulls the image (about 3 GB) and runs a full
+`west update`, which fetches ZMK, Zephyr and the hardware libraries. That
+workspace lives in the Docker volume `vilemk-zmk`, not in this checkout, and
+later builds reuse it. `docker volume rm vilemk-zmk` frees the space; the
+next build fetches it again.
 
-```yaml
-include:
-  - board: eyelash_sofle_left
-    shield: nice_view
-    cmake-args: -DKEYMAP_FILE="${GITHUB_WORKSPACE}/config/eyelash_sofle-colemak.keymap"
-```
+What a build does, per entry, is what ZMK's `build-user-config.yml` does:
+`west build -s zmk/app -b <board> [-S <snippet>] -- -DZMK_CONFIG=... [-DSHIELD=...] <cmake-args>`,
+in a fresh directory, naming the output `<artifact-name>` or
+`<shield>-<board>-zmk`. It sees a copy of `config/` with the variant's keymap
+added, and adds `-DKEYMAP_FILE` for that keymap itself, so the variant's
+`build.yaml` does not name one. `python3 -m vilemk.firmware <variant> --dry-run`
+prints the exact command and script.
 
-The rest of the vendor's entries, such as a Studio build or a settings-reset
-build, are extra firmware files you may not want. Copy those only if you know
-you need them.
+### Parts the vendor lists
 
-**When you do not have the part.** This is the version problem above, and it
-takes one more step. Leaving the `shield:` line out is right, but it may not
-be enough on its own. A vendor building for the version with the part often
-switches that feature on for everyone, down in the keyboard's own settings.
-The build then goes looking for hardware that is not there and fails. You
-have to switch it back off.
+Most keyboards are more than a board. A screen, an encoder or an add-on
+module is a separate part the build has to be told about, on the entry for
+the half it is plugged into. The vendor writes one build list for every
+version they sell, with a screen and without, so it cannot say which one is
+on your desk.
 
-Do it without touching the vendor's files. Make a file in the config repo's
-`config/` directory named after the half it applies to
-(`config/<board>.conf`, so `config/eyelash_sofle_left.conf` for an Eyelash
-Sofle's left side) holding the one line that turns the feature off:
+The variant bar's **has** boxes list those parts for the keyboard on screen,
+taken from the vendor's `build.yaml` in `.zmk/modules/<module>/`. Tick the
+ones you have and save; the variant's `build.yaml` gets the matching
+`shield:` lines. An unticked screen also switches the display off in that
+entry (`-DCONFIG_ZMK_DISPLAY=n`), because a vendor building for the version
+with a screen often turns the display on for everyone, and the build then
+fails looking for hardware that is not there.
+
+To switch a feature off for a half by hand instead, put the line in
+`config/<board>.conf` (for an Eyelash Sofle's left half,
+`config/eyelash_sofle_left.conf`):
 
 ```
 CONFIG_ZMK_DISPLAY=n
 ```
 
-The file is added on top of the vendor's settings rather than replacing them:
-only what you write here changes, and everything else the keyboard needs
-carries on untouched. It is yours. The CLI never touches it, and it survives
-every `zmk keyboard add` from here on.
+It is added on top of the vendor's settings, and nothing VileMK fetches ever
+overwrites it. Nothing under `.zmk/` is yours: it is a downloaded copy, and
+the next fetch replaces it.
 
-The mirror image is yours to handle too: a part you added that the vendor
-never listed needs its own line here.
-
-**`make check` reads `build.yaml` too**, and every mistake in this section is
-one it looks for: the two halves naming different keymaps, a `KEYMAP_FILE`
-that points at nothing, a vendor `shield:` your entry left out with no
-`.conf` line switching the matching feature off, and two entries whose
-`.uf2` files collide. It compares your build list against the vendor's own,
-in the CLI cache, and against what is actually in `config/`. It never writes.
-It prints the line to add, and you edit and push.
-
-It cannot check everything. A `shield:` the vendor never listed, a part they
-list under a name that looks nothing like a display, or a keyboard with no
-vendor module in the cache at all are still yours to read for. When it has
-nothing to compare against it says so rather than staying quiet.
+**`make check` reads `build.yaml` too.** It compares your build list against
+the vendor's: a vendor `shield:` your entry leaves out with no `.conf` line
+switching the matching feature off, two entries whose `.uf2` files collide,
+and a `KEYMAP_FILE` left in a build list (the build adds it). It never
+writes; it prints the line to add. It cannot catch a part the vendor never
+listed, or a keyboard with no vendor module at all, and says so when it has
+nothing to compare against.
 
 ### A worked example: Eyelash Sofle
 
-`zmk keyboard add` has been run once for an Eyelash Sofle. The config repo
-now has `config/eyelash_sofle.keymap`, the CLI's default keymap, and a
-`build.yaml` holding one entry per half:
+`config/` holds `eyelash_sofle.keymap`, and `config/west.yml` lists the
+`zmk-eyelash-sofle` module. In the app you design some VileDances and combos,
+bind them, and **Save as new variant** as `eyelash_sofle_colemak`. That writes
+`variants/eyelash_sofle_colemak/` with the keymap and a `build.yaml` holding
+one entry per half.
 
-```yaml
-include:
-  - board: eyelash_sofle_left
-  - board: eyelash_sofle_right
-```
+The vendor lists `nice_view` on the left half and `nice_view_custom` on the
+right, so the variant bar shows both under **has**. This keyboard has no
+screens: untick both and save again. The left entry gains
+`-DCONFIG_ZMK_DISPLAY=n`, since the left half's own settings turn the display
+on; the right one needs nothing.
 
-In VileMK you designed some VileDances and combos, bound them, and hit **Save
-as new variant**, which wrote `variants/eyelash_sofle-colemak.keymap`.
-
-Copy that file into the config repo's `config/` directory. Keep the name:
-`eyelash_sofle-colemak.keymap` matches neither board, so ZMK will not find it
-by name, and `eyelash_sofle.keymap`, which does match and which the CLI owns,
-stays where it is.
-
-Then edit `build.yaml` so both halves name the file you just copied:
-
-```yaml
-include:
-  - board: eyelash_sofle_left
-    cmake-args: -DKEYMAP_FILE="${GITHUB_WORKSPACE}/config/eyelash_sofle-colemak.keymap"
-  - board: eyelash_sofle_right
-    cmake-args: -DKEYMAP_FILE="${GITHUB_WORKSPACE}/config/eyelash_sofle-colemak.keymap"
-```
-
-The two lines are identical: same file, both halves.
-
-Now the check above. `.zmk/modules/zmk-eyelash-sofle/build.yaml` carries
-`shield: nice_view` on the left half and `shield: nice_view_custom` on the
-right. This keyboard was sold with screens, and the CLI's two plain entries
-say nothing about them. Which lines you want depends on the version you own:
-
-- **With the screens**: add each `shield:` line to its half, beside the
-  `cmake-args` line already there.
-- **Without them**: leave the shields out. The left half's own settings
-  switch the display feature on regardless, and the build then fails on a
-  missing screen, so add `config/eyelash_sofle_left.conf` containing
-  `CONFIG_ZMK_DISPLAY=n`. The right half needs nothing; its settings never
-  turn the display on.
-
-Check the copy, then commit and push in the config repo:
-
-```bash
-make check ARGS="/path/to/zmk-config/config/eyelash_sofle-colemak.keymap"
-```
-
-The run produces a `firmware.zip` holding `eyelash_sofle_left-…-zmk.uf2` and
-its right-hand counterpart. Flash the left half with the left file and the
-right half with the right one.
-
-The Eyelash Sofle is a board, so its entries have no `shield:` line. A
-keyboard built as a shield on a generic controller, like a Corne on a
-nice!nano, has `board:` and `shield:` on each entry; leave both alone and add
-the same `cmake-args` line beside them.
+**Build firmware** then writes `eyelash_sofle_left-zmk.uf2` and
+`eyelash_sofle_right-zmk.uf2` into `variants/eyelash_sofle_colemak/firmware/`.
+Flash the left half with the left file and the right half with the right one.
+If the keyboard has been used with ZMK Studio, tick **include reset** first
+and flash the two `settings_reset-…` files before the firmware.

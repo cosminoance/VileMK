@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-import { rowKey, summarise, unresolved, type ImportRow } from "../lib/transfer";
+import { rowKey, summarise, unresolved, type ImportRow, type Needed } from "../lib/transfer";
 import { exportVariant, openImport, runImport } from "../state/actions";
 import { useStore } from "../state/store";
 
@@ -102,10 +102,7 @@ export function ImportDialog() {
 
         {!imp.known
           ? <>
-              <div className="warn">
-                <code>{imp.board}</code> is not added to this project. Add it
-                first: without its physical layout there is nothing to import into.
-              </div>
+              <MissingBoard board={imp.board} mod={imp.module} />
               <div className="rowbtns"><button className="ghost" onClick={close}>
                 Close
               </button></div>
@@ -159,4 +156,48 @@ export function ImportDialog() {
       </div>
     </div>
   );
+}
+
+/** Why a keymap cannot be imported yet, and what to add so it can. */
+function MissingBoard({ board, mod }: { board: string; mod: Needed | null }) {
+  const kb = <code>{board || "its keyboard"}</code>;
+  if (!mod)
+    return <>
+      <div className="msg bad">
+        This keymap is for {kb}, which is not added to this project. Without the
+        keyboard's physical layout there is nothing to import into.
+      </div>
+      <p className="legend">
+        The file does not say where the keyboard comes from. Ask whoever sent it
+        which ZMK module has the keyboard, add that module to{" "}
+        <code>config/west.yml</code>, run <code>make module ARGS=&lt;name&gt;</code>,
+        and import again.
+      </p>
+    </>;
+  const entry = [
+    `    - name: ${mod.name}`,
+    `      url: ${mod.url}`,
+    `      path: modules/${mod.name}`,
+    `      revision: ${mod.ref || "main"}`,
+  ].join("\n");
+  return <>
+    <div className="msg bad">
+      This keymap is for {kb}, from the vendor module <code>{mod.name}</code> (
+      <code>{mod.url}</code>). {!mod.listed
+        ? "This project does not have that module. Add it, then import the file again."
+        : !mod.fetched
+        ? "The module is in config/west.yml but has not been fetched. Fetch it, then import the file again."
+        : "The module is here but has no layout for this keyboard. Update it, then import the file again."}
+    </div>
+    {!mod.listed && <>
+      <p className="legend">
+        1. Add it under <code>projects:</code> in <code>config/west.yml</code>:
+      </p>
+      <pre className="dts">{entry}</pre>
+    </>}
+    <p className="legend">
+      {mod.listed ? "" : "2. "}{mod.fetched ? "Update it:" : "Fetch it:"}
+    </p>
+    <pre className="dts">make module ARGS={mod.name}</pre>
+  </>;
 }

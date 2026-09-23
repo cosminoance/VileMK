@@ -4,6 +4,7 @@ import { getState } from "./lib/api";
 import { KeymapView } from "./components/KeymapView";
 import { Sidebar } from "./components/Sidebar";
 import { VersionChip } from "./components/Changelog";
+import { SettingsChip } from "./components/Settings";
 import { ImportDialog } from "./components/Transfer";
 import { LIVE, StoreProvider, useStore } from "./state/store";
 import logo from "../../vilemk/webui/assets/logo.png";
@@ -14,7 +15,7 @@ function Shell() {
     <header>
       <span className="ident">
         <span className="brand"><img src={logo} alt="VileMK" /></span>
-        <VersionChip />
+        <span className="chips"><VersionChip /><SettingsChip /></span>
       </span>
       <span className="meta">
         {s.data.repo_path} &middot; generated {s.data.generated} &middot;{" "}

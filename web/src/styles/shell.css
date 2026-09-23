@@ -2,10 +2,11 @@
    layer tabs. Unchanged except that the boot screen (before /api/state answers)
    has a class of its own, since the old page had no such state. */
 body{margin:0;background:var(--bg);color:var(--ink);
-  font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  font:14px/1.45 var(--font)}
+button,input,select,textarea{font-family:inherit}
 header{display:flex;gap:12px;align-items:center;padding:10px 16px;
   border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
-header .brand{display:inline-flex;align-items:center;background:#14171c;border-radius:6px;
+header .brand{display:inline-flex;align-items:center;background:var(--brand);border-radius:6px;
   padding:5px 10px;line-height:0}
 header .brand img{display:block;height:20px;width:auto}
 header .meta{color:var(--muted);font-size:12px}
@@ -22,7 +23,7 @@ aside{width:250px;flex:none;border-right:1px solid var(--line);background:var(--
   width:16px;height:56px;margin-left:-1px;padding:0;
   border:1px solid var(--line);border-left-color:var(--panel);
   border-radius:0 6px 6px 0;background:var(--panel);color:var(--muted);
-  cursor:pointer;font:14px/1 ui-sans-serif,system-ui,sans-serif}
+  cursor:pointer;font:14px/1 var(--font)}
 .railtab:hover{background:var(--accent-soft);color:var(--accent);
   border-color:var(--accent);border-left-color:var(--accent-soft)}
 .wrap.closed .railtab{margin-left:0;border-left-color:var(--line)}
@@ -45,7 +46,7 @@ main.boot code{color:var(--accent)}
 main.boot .bad{color:var(--warn)}
 .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
 .bar h2{margin:0;font-size:17px}
-.bar .path{color:var(--muted);font-size:12px;font-family:ui-monospace,monospace}
+.bar .path{color:var(--muted);font-size:12px;}
 /* A `<select>` sizes itself to its longest option, and the compare-with list
    holds absolute paths - so it is capped, and allowed to shrink inside the
    bar, instead of setting the page's width. */
@@ -56,16 +57,17 @@ label.toggle{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
 .tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px}
 .tabs button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;
   background:var(--panel);color:var(--ink);cursor:pointer;font:inherit}
-.tabs button.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+.tabs button.sel{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
 /* The version chip sits under the wordmark and opens the changelog. Styled as
    a link rather than a button so it reads as one; the `?` bubble is the only
    hint that there is something behind it. */
 header .ident{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
 .verchip{background:none;border:0;padding:0;cursor:pointer;
-  color:var(--muted);font:11px/1 inherit;letter-spacing:.02em;
+  color:var(--muted);font:11px/1 var(--font);letter-spacing:.02em;
   display:inline-flex;align-items:center;gap:5px}
 .verchip:hover{color:var(--accent);text-decoration:underline}
+header .chips{display:flex;gap:10px;align-items:center}
 .q{display:inline-flex;align-items:center;justify-content:center;
   width:13px;height:13px;border-radius:50%;border:1px solid currentColor;
   font-size:9px;line-height:1;text-decoration:none}

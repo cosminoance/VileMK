@@ -17,6 +17,7 @@ import { slugify } from "../lib/keymaps";
 import { layersOf, type Layer } from "../lib/layers";
 import { useStore } from "../state/store";
 import { Board } from "./Board";
+import { PictureIcon } from "./Icons";
 import { Toggle } from "./Toggle";
 
 const caption = (l: Layer, i: number) =>
@@ -26,7 +27,8 @@ export function ExportButton({ km }: { km: any }) {
   const [open, setOpen] = useState(false);
   return <>
     <button className="xbtn" title={`Export ${km.name} as an image`}
-            onClick={(e) => { e.stopPropagation(); setOpen(true); }}>⤓</button>
+            aria-label={`Export ${km.name} as an image`}
+            onClick={(e) => { e.stopPropagation(); setOpen(true); }}><PictureIcon /></button>
     {open && <ExportDialog km={km} close={() => setOpen(false)} />}
   </>;
 }

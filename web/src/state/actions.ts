@@ -86,14 +86,16 @@ export async function previewBinding(d: D, kind: string, rec: any): Promise<stri
 export async function saveVariant(
   s: State, d: D, km: any, over: string | null, typed: string, reset: boolean,
   parts: Record<string, boolean>,
-) {
+): Promise<boolean> {
   const name = over || typed.trim();
-  if (!name)
-    return d({ t: "msg", msg: { text: "give the variant a name", bad: true } });
+  if (!name) {
+    d({ t: "msg", msg: { text: "give the variant a name", bad: true } });
+    return false;
+  }
   if (!over
       && s.data.keymaps.some((k: any) => k.kind === "variant" && k.name === slugify(name))
       && !confirm(`variants/${slugify(name)}/ already exists. Overwrite it?`))
-    return;
+    return false;
   try {
     const r = await api("POST", "/api/variant",
                         { name, base: km.id, assignments: s.assign,
@@ -113,7 +115,8 @@ export async function saveVariant(
         msg: { text: `wrote ${r.folder || r.wrote}`
                  + (r.build ? " (keymap + build.yaml)" : "")
                  + (r.warnings && r.warnings.length ? " - " + r.warnings.join("; ") : "") } });
-  } catch (e) { d({ t: "msg", msg: bad(e) }); }
+    return true;
+  } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
 }
 
 // Deleting is ours to offer only because `variants/` is ours to write: the
@@ -154,7 +157,7 @@ export async function openImport(d: D, file: File) {
                         { text, filename: file.name });
     d({ t: "imp", imp: {
       filename: file.name, text,
-      board: r.board, known: !!r.known,
+      board: r.board, known: !!r.known, module: r.module || null,
       name: r.name, taken: !!r.taken,
       records: r.records || [],
       choices: {}, renames: {}, busy: false, error: null, result: null,

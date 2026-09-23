@@ -44,7 +44,7 @@ export function Sidebar() {
           ? groups.map((g) => (
               <div key={g.kind}>
                 <div className="group">{KINDS[g.kind]}</div>
-                {/* The row is a pair: the name selects, the ⤓ beside it
+                {/* The row is a pair: the name selects, the picture icon beside it
                     exports that keymap as a picture without opening it. */}
                 {g.rows.map((k: any) => (
                   <div key={k.id}

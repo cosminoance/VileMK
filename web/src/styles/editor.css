@@ -12,17 +12,17 @@
 .slot > span{color:var(--muted);font-size:13px;text-align:right;width:120px;flex:none}
 .kb{width:132px;height:46px;text-align:center;border:2px solid var(--key-line);
   border-radius:8px;background:var(--key);color:var(--ink);
-  font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+  font:12px var(--font)}
 .kb:focus{outline:none;border-color:var(--accent)}
 .kb.sm{width:86px;height:30px;border-width:1px;text-align:left;padding:0 8px}
 .kb.wide{width:200px;height:30px;border-width:1px;text-align:left;padding:0 8px}
 .hint{color:var(--muted);font-size:12px;margin-top:12px;max-width:420px}
 .rowbtns{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
 button.act{padding:6px 14px;border:1px solid var(--accent);background:var(--accent);
-  color:#fff;border-radius:6px;cursor:pointer;font:inherit}
+  color:var(--on-accent);border-radius:6px;cursor:pointer;font:inherit}
 button.ghost{padding:6px 14px;border:1px solid var(--line);background:var(--panel);
   color:var(--ink);border-radius:6px;cursor:pointer;font:inherit}
-button.danger{border-color:#c0392b;color:#c0392b;background:none}
+button.danger{border-color:var(--danger);color:var(--danger);background:none}
 pre.dts{background:var(--bg);border:1px solid var(--line);border-radius:6px;
   padding:10px;overflow:auto;font-size:11px;max-height:340px;margin:10px 0 0}
 .items button{display:block;width:100%;text-align:left;padding:6px 8px;border:0;
@@ -37,10 +37,21 @@ pre.dts{background:var(--bg);border:1px solid var(--line);border-radius:6px;
 .picktabs{margin:0 0 8px;align-items:center}
 .picktabs button{font-size:12px;padding:4px 12px}
 .ptarget{color:var(--muted);font-size:12px;margin-left:8px}
+/* `components/Dropdown.tsx`: a button with its actions listed under it. */
+.drop{position:relative;display:inline-flex}
+.drop .caret{font-size:11px;margin-left:2px}
+.dropmenu{position:absolute;top:calc(100% + 4px);left:0;z-index:6;min-width:100%;
+  display:flex;flex-direction:column;padding:4px;background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.15)}
+.dropmenu button{padding:6px 10px;border:0;border-radius:6px;background:none;
+  color:var(--ink);font:inherit;text-align:left;white-space:nowrap;cursor:pointer}
+.dropmenu button:hover,.dropmenu button:focus-visible{background:var(--accent-soft);
+  color:var(--accent);outline:none}
+.dropmenu button.danger{color:var(--danger)}
 button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
 .tdlist{display:flex;flex-wrap:wrap;gap:6px}
 .pk.td{width:auto;height:auto;min-height:38px;padding:4px 12px;align-items:flex-start;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  font-family:var(--font)}
 .pk.off{opacity:.4;pointer-events:none}
 .picker{margin-top:14px;overflow-x:auto;padding-bottom:8px}
 .picker.hidden{display:none}
@@ -53,11 +64,11 @@ button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
 .picker .pk{height:38px;flex:none;display:flex;flex-direction:column;align-items:center;
   justify-content:center;padding:0 3px;text-align:center;cursor:pointer;
   border:1px solid var(--key-line);border-radius:5px;background:var(--key);
-  color:var(--ink);font:11px/1.15 ui-sans-serif,system-ui,sans-serif}
+  color:var(--ink);font:11px/1.15 var(--font)}
 .picker .pk:hover{border-color:var(--accent);background:var(--accent-soft)}
-.picker .pk.sel{border-color:var(--accent);background:var(--accent);color:#fff}
+.picker .pk.sel{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
 .picker .pk .up{font-size:10px;color:var(--muted)}
-.picker .pk.sel .up{color:#fff}
+.picker .pk.sel .up{color:var(--on-accent)}
 .picker .sp{flex:none}
 .menu{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}
 .menu > .tabs{margin-top:0}
@@ -66,7 +77,7 @@ button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
 .pkg .pk{border-top-right-radius:0;border-bottom-right-radius:0}
 .pkedit{border:1px solid var(--key-line);border-left:0;border-radius:0 5px 5px 0;
   background:var(--key);color:var(--muted);cursor:pointer;padding:0 8px;
-  font:11px/1 ui-sans-serif,system-ui,sans-serif}
+  font:11px/1 var(--font)}
 .pkedit:hover{color:var(--accent);border-color:var(--accent)}
 /* Was `#kb-picker > .hint`: the picker is a component now, not an id. */
 .picker > .hint{max-width:640px}
@@ -79,7 +90,7 @@ button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
 .brow .bopen:hover{background:var(--bg)}
 .brow .nm{font-weight:600;font-size:13px}
 .brow small{display:block;color:var(--muted);font-size:11px;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  font-family:var(--font)}
 .brow.sel{border-color:var(--accent);background:var(--accent-soft)}
 .tgl{width:54px;flex:none;border-radius:6px;cursor:pointer;font:inherit;font-size:11px;
   text-transform:uppercase;letter-spacing:.06em}

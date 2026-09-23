@@ -1,5 +1,5 @@
-/* Export buttons, the export dialog, the sidebar's import target, and the
-   import dialog. */
+/* Export buttons, the export dialog, the sidebar's import target, the
+   import dialog, the settings sheet, the build sheet and the save-as sheet, which share the modal. */
 aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
 .impbtn{display:block;width:100%;margin:0 0 10px;text-align:center}
 
@@ -10,6 +10,7 @@ aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
   padding:18px 20px;width:min(760px,100%)}
 .sheet h2{margin:0;font-size:17px}
 .sheet .bar{margin-bottom:10px}
+.sheet.saveas{width:min(460px,100%)}
 
 .ilist{list-style:none;margin:12px 0;padding:0;display:flex;flex-direction:column;
   gap:6px}
@@ -37,6 +38,7 @@ aside .kbrow .xbtn{flex:none;width:26px;padding:6px 0;text-align:center;
   color:var(--muted);font-size:14px;opacity:0}
 aside .kbrow:hover .xbtn,aside .kbrow:focus-within .xbtn,
 aside .kbrow.sel .xbtn{opacity:1}
+aside .kbrow .xbtn .icon{display:block;margin:0 auto}
 aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
 
 /* The export dialog's layer list, two or three columns rather than one long
@@ -48,3 +50,14 @@ aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
    just nowhere the user can see: `display:none` would leave them unstyled. */
 .offscreen{position:absolute;left:-99999px;top:0;width:4000px;
   pointer-events:none}
+
+/* Settings: one label column, inputs filling the rest. */
+.settings h3{margin:14px 0 8px;font-size:13px}
+.settings .fields{display:grid;grid-template-columns:max-content 1fr;gap:8px 12px;
+  align-items:center;font-size:12px;color:var(--muted);margin:12px 0}
+.settings .fields .kb.wide{width:100%}
+
+/* Build: the log fills most of the sheet and follows the newest line. */
+.build pre.log{max-height:50vh;white-space:pre-wrap;word-break:break-all}
+.build .files{margin:10px 0 0;padding-left:18px;font-size:12px}
+.build .files li{margin:3px 0}

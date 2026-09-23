@@ -10,14 +10,14 @@
    stay the natural size, which is what the PNG export reads. */
 .board{display:block;margin:0 auto 18px;max-width:100%;height:auto}
 .k rect{fill:var(--key);stroke:var(--key-line);stroke-width:1}
-.k text{fill:var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.k text{fill:var(--ink);font-family:var(--font)}
 /* The shifted legend, printed where a real keycap prints it: above the plain
    one, exactly like the picker's `.up`. Deliberately NOT `.hint`'s accent - a
    hint is another outcome of the binding, this is the same outcome with shift
    held, which is the OS's doing and not the keymap's. */
 .k .shift{fill:var(--muted)}
 .k .pos{fill:var(--muted);font-size:9px;
-  font-family:ui-sans-serif,system-ui,sans-serif}
+  font-family:var(--font)}
 .k .hint{fill:var(--accent);font-size:9px}
 .k .was{fill:var(--diff)}
 .k.diff rect{stroke:var(--diff);fill:var(--diff-soft)}
@@ -33,6 +33,21 @@ section.card{background:var(--panel);border:1px solid var(--line);border-radius:
   padding:10px 12px;min-width:0;flex:1 1 280px;overflow-x:auto}
 section.card h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;
   letter-spacing:.06em;color:var(--muted)}
+/* A card that collapses to its heading: `components/Fold.tsx`. */
+section.card.fold{margin-bottom:12px;padding:0;overflow:visible}
+.foldhead{display:flex;gap:8px;align-items:baseline;width:100%;padding:8px 12px;
+  border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;text-align:left}
+section.card .foldhead h3{margin:0}
+.foldhead:hover,.foldhead:hover h3{color:var(--accent)}
+.foldhead .chev{display:inline-block;width:1em;line-height:1;text-align:center;transition:transform .12s}
+.fold.open .foldhead .chev{transform:rotate(90deg)}
+.foldbody{padding:0 12px 10px}
+.foldbody .bar{margin-bottom:0}
+.foldbody .hint{margin-top:6px}
+.foldbody .warn{margin:8px 0 0}
+.foldhead .foldwarn{color:var(--warn)}
+/* The build button ends the options row, pushed right so it is not read as one of them. */
+.buildgo{display:inline-flex;gap:10px;align-items:center;margin-left:auto}
 table{border-collapse:collapse;width:100%;font-size:12px}
 /* A label like `&ht_tapbackspace_holdlayer2` is one unbreakable word, and it
    alone is wider than a third of the column. Cells break inside a word rather
@@ -42,7 +57,7 @@ td,th{text-align:left;padding:3px 6px;border-bottom:1px solid var(--line);
 th{color:var(--muted);font-weight:500}
 tr.combo:hover{background:var(--combo-soft)}
 tr.usedby:hover{background:var(--accent-soft)}
-code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+code,.mono{font-family:var(--font)}
 .warn{background:var(--warn-soft);color:var(--warn);border-radius:6px;padding:6px 10px;
   margin-bottom:10px;font-size:12px}
 .legend{color:var(--muted);font-size:12px;margin-bottom:10px}

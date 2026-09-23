@@ -12,6 +12,14 @@
 #   make kill       # just kill a stale server, without starting a new one
 #   make check      # validation only (build.yaml, then every keymap)
 #   make pos        # print key-position maps
+#   make zmk        # fetch ZMK's board data at the ref in config/west.yml
+#                   # and pin the commit (ARGS="--ref v0.3" to switch)
+#   make module ARGS=<name>
+#                   # fetch a keyboard module listed in config/west.yml
+#                   # into .zmk/modules/<name>/ and pin the commit
+#   make firmware ARGS=<variant>
+#                   # build a variant's firmware in Docker, into
+#                   # variants/<variant>/firmware/
 #   make install    # put vilemk-* on your PATH
 #   make clean
 
@@ -20,7 +28,7 @@ NPM ?= npm
 # Extra flags, e.g.  make check ARGS="config/corne.keymap"
 ARGS ?=
 
-.PHONY: all design kill check web webdev pos install uninstall build clean help
+.PHONY: all design kill check web webdev pos zmk module firmware install uninstall build clean help
 .DEFAULT_GOAL := all
 
 all: check design
@@ -60,6 +68,21 @@ check:
 
 pos:
 	$(PY) -m vilemk.keypos $(ARGS)
+
+# Writes .zmk/zmk/ and config/west.yml, nothing else. With no west.yml yet it
+# starts one at ZMK v0.3, which is how a fresh checkout gets its board data.
+zmk:
+	$(PY) -m vilemk.workspace update zmk $(ARGS)
+
+# Writes .zmk/modules/<name>/ and its pin in config/west.yml. The module has to
+# be listed there first.
+module:
+	$(PY) -m vilemk.workspace update $(ARGS)
+
+# Needs Docker. The west workspace lives in the `vilemk-zmk` volume; the first
+# run pulls the build image and all of ZMK and Zephyr.
+firmware:
+	$(PY) -m vilemk.firmware $(ARGS)
 
 install:
 	uv tool install --editable . || pip install -e .

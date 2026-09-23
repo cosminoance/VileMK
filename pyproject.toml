@@ -1,12 +1,12 @@
 # The Python equivalent of package.json. `dependencies` is empty on purpose:
 # every tool here runs on the standard library alone, so there is nothing to
-# install before using them. Installing this project only puts the three
-# commands on your PATH.
+# install before using them. Installing this project only puts the commands
+# below on your PATH.
 
 [project]
 name = "vilemk"
 version = "0.1.1"
-description = "Read, check and view ZMK keymaps from a zmk-cli config repo"
+description = "Design, check and build ZMK keymaps"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
@@ -18,6 +18,8 @@ dev = ["ruff>=0.6"]
 vilemk-keypos = "vilemk.keypos:main"
 vilemk-check = "vilemk.check:main"
 vilemk-design = "vilemk.webui.server:main"
+vilemk-workspace = "vilemk.workspace:main"
+vilemk-build = "vilemk.firmware:main"
 
 [build-system]
 requires = ["setuptools>=64"]

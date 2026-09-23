@@ -3,13 +3,17 @@
   --key:#fff; --key-line:#c8cfda; --accent:#2f6feb; --accent-soft:#e5edfd;
   --warn:#8a5a00; --warn-soft:#fff4d9; --diff:#b8860b; --diff-soft:#fdf1cf;
   --combo:#0a7a5a; --combo-soft:#d8f3e9;
+  --on-accent:#fff; --danger:#c0392b; --brand:#14171c;
+  --font:"JetBrainsMono Nerd Font Mono","JetBrainsMono NFM","JetBrains Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme:dark){
+  /* Evening in Kyoto (~/git/evening-in-kyoto-nvim) neutrals and hues; accent is the logo's mint. */
   :root{
-    --bg:#14171c; --panel:#1b1f26; --ink:#e7eaef; --muted:#98a1b0; --line:#2c323c;
-    --key:#232935; --key-line:#39414f; --accent:#6f9dff; --accent-soft:#1e2b46;
-    --warn:#f0c46a; --warn-soft:#3a2f13; --diff:#e8bd5a; --diff-soft:#3b3116;
-    --combo:#5fd3ae; --combo-soft:#12332a;
+    --bg:#1a1a1a; --panel:#212121; --ink:#c4c5b5; --muted:#96927f; --line:#2e2e2e;
+    --key:#262626; --key-line:#3a3a3a; --accent:#40f7bf; --accent-soft:#203b33;
+    --on-accent:#1a1a1a; --danger:#9f7887; --brand:#1a1a1a;
+    --warn:#fa8419; --warn-soft:#3c2d1a; --diff:#ff9f43; --diff-soft:#3c342e;
+    --combo:#9e7cc0; --combo-soft:#2a2530;
   }
 }
 *{box-sizing:border-box}
