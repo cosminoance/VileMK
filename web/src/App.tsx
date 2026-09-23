@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getState } from "./lib/api";
 import { KeymapView } from "./components/KeymapView";
 import { Sidebar } from "./components/Sidebar";
+import { VersionChip } from "./components/Changelog";
 import { ImportDialog } from "./components/Transfer";
 import { LIVE, StoreProvider, useStore } from "./state/store";
 import logo from "../../vilemk/webui/assets/logo.png";
@@ -11,7 +12,10 @@ function Shell() {
   const { s } = useStore();
   return <>
     <header>
-      <span className="brand"><img src={logo} alt="VileMK" /></span>
+      <span className="ident">
+        <span className="brand"><img src={logo} alt="VileMK" /></span>
+        <VersionChip />
+      </span>
       <span className="meta">
         {s.data.repo_path} &middot; generated {s.data.generated} &middot;{" "}
         {LIVE(s) ? "live · saving to custom/" : "read-only"}

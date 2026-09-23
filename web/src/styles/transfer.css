@@ -1,4 +1,5 @@
-/* Export buttons, the sidebar's import target, and the import dialog. */
+/* Export buttons, the export dialog, the sidebar's import target, and the
+   import dialog. */
 aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
 .impbtn{display:block;width:100%;margin:0 0 10px;text-align:center}
 
@@ -26,3 +27,24 @@ aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
 .cmp pre{margin:0;padding:8px;border-radius:6px;background:var(--bg);
   border:1px solid var(--line);font-size:11px;white-space:pre-wrap;
   word-break:break-word}
+
+/* A sidebar row is a name that selects plus the export handle. The handle is
+   quiet until the row is hovered, focused or selected: it is one control per
+   keyboard in a list that is mostly read. */
+aside .kbrow{display:flex;align-items:center;gap:2px}
+aside .kbrow > button{flex:1;min-width:0}
+aside .kbrow .xbtn{flex:none;width:26px;padding:6px 0;text-align:center;
+  color:var(--muted);font-size:14px;opacity:0}
+aside .kbrow:hover .xbtn,aside .kbrow:focus-within .xbtn,
+aside .kbrow.sel .xbtn{opacity:1}
+aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
+
+/* The export dialog's layer list, two or three columns rather than one long
+   ladder: a 10-layer keymap should not push the buttons off the sheet. */
+.xlayers{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px;
+  grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.xlayers .toggle{display:block;font-size:12px}
+/* The boards the export serialises. Laid out and styled like the real one,
+   just nowhere the user can see: `display:none` would leave them unstyled. */
+.offscreen{position:absolute;left:-99999px;top:0;width:4000px;
+  pointer-events:none}

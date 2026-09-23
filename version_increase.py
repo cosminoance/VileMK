@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """Bump the patch number in version/version.json, and mirror it into pyproject.
 
-version/version.json is the single source of truth. pyproject.toml's `version`
-is a copy this script keeps in step, so a wheel carries the same number as the
-tag.
+version/version.json holds the version the *next* merge to main is tagged as:
+CI tags what it finds, then runs this. So a pull request's changelog entry goes
+in changelog/<the version currently in version.json>.md.
 
     python3 version_increase.py --current   # print the version, do not touch it
     python3 version_increase.py             # x.y.z -> x.y.(z+1)
 
-The version in the file is the one the *next* merge to main is tagged as: CI
-tags it, then runs this. So a pull request's changelog entry goes in
-changelog/<the version currently in version.json>.md.
-
-A minor or major bump is a hand edit of version/version.json in a pull request;
-CI always tags what it finds and then adds one to the patch.
+A minor or major bump is a hand edit of version/version.json in a pull request.
 """
 
 import json
