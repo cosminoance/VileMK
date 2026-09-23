@@ -1,11 +1,11 @@
-"""Read the ZMK keymaps in a config repo and turn them into plain data.
+"""Read the ZMK keymaps in the project and turn them into plain data.
 
 Parsing only: devicetree in, dicts and lists out. Nothing here knows that a
 web page exists — rendering lives in `vilemk.webui`. `collect_data()` is the
 one entry point both the static builder and the live server call.
 
 Sources, in the order they are discovered: vendor default keymaps from the
-read-only `.zmk/` CLI cache, your own `config/*.keymap`, and any saved
+fetched board data in `.zmk/`, your own `config/*.keymap`, and any saved
 variations in `variants/*.keymap`. Each one's physical layout is resolved
 through `vilemk.keypos`, so key positions are the real ones.
 """
@@ -16,7 +16,7 @@ import datetime
 import os
 import re
 
-from . import PROJECT_DIR, keypos
+from . import keypos
 from .keypos import (binding_tokens, funclike_defines, node_bodies, prop_value,
                      strip_comments)
 
@@ -354,13 +354,6 @@ class BuildEntry:
         m = KEYMAP_FILE_RE.search(self.get("cmake-args") or "")
         return _yaml_unquote(m.group(1)) if m else None
 
-    def keymap_path(self):
-        """That value as a repo-relative path, or None."""
-        raw = self.keymap_file()
-        if raw is None:
-            return None
-        return os.path.normpath(WORKSPACE_RE.sub("", raw).lstrip("/")) or None
-
     def artifact(self) -> str:
         """What the .uf2 inside firmware.zip ends up called."""
         return self.get("artifact-name") or "-".join(
@@ -472,14 +465,12 @@ def discover(zmk_dir, include=(), take_all=False):
     """-> [(kind, path)] for every keymap worth showing."""
     found = []
 
-    # `config/` and `keymaps/` are in the ZMK config repo (we chdir'd there);
-    # `variants/` is ours and lives in the VileMK checkout, so look in both places.
+    # Relative to the project, which every command chdirs into.
     # A variant is a folder - `variants/<name>/<name>.keymap` beside the
     # `build.yaml` that builds it - so look one level down as well as flat.
     # Flat `.keymap` files are what earlier versions wrote, and still count.
     for base, kind in (("config", "config"), ("variants", "variant"),
-                       ("keymaps", "variant"),
-                       (os.path.join(PROJECT_DIR, "variants"), "variant")):
+                       ("keymaps", "variant")):
         if not os.path.isdir(base):
             continue
         for fn in sorted(os.listdir(base)):
@@ -498,7 +489,6 @@ def discover(zmk_dir, include=(), take_all=False):
         wanted |= {re.sub(r"_(left|right)$", "", n) for n in wanted}
 
     for root in (os.path.join(zmk_dir, "modules"),
-                 os.path.join(zmk_dir, "config"),
                  os.path.join(zmk_dir, "zmk", "app", "boards")):
         if not os.path.isdir(root):
             continue

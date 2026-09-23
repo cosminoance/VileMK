@@ -1,8 +1,7 @@
 # Task runner - the `scripts` block of a package.json.
 # Every target runs the scripts in place; nothing here needs to be installed
-# first. The ZMK config repo is found by the scripts themselves (--repo,
-# $ZMK_CONFIG, a config/west.yml above the cwd, or `zmk config user.home`),
-# so these work from any directory.
+# first. Every command works on this checkout: config/, build.yaml and .zmk/
+# live beside the code.
 #
 #   make            # check every keymap, then build the app and serve it
 #   make design     # kill any stale instance, then start the local backend
@@ -55,7 +54,7 @@ kill:
 
 # build.yaml first - which halves get built, from which keymap, with which
 # parts - then every keymap in config/ and variants/. Read-only, like
-# everything here: it prints the line to add, you edit and push.
+# everything here: it prints the line to add, you edit.
 check:
 	$(PY) -m vilemk.check $(ARGS)
 

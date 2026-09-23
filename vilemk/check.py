@@ -1,19 +1,19 @@
 """Static checks for a ZMK keymap and for the build list that decides what
 ships.
 
-Catches the mistakes that otherwise cost a full GitHub Actions round-trip.
+Catches the mistakes that otherwise cost a full firmware build.
 
 In the keymap: wrong number of bindings in a layer, out-of-range key positions,
 references to undefined behaviors, parameter counts that don't match
 #binding-cells, and unbalanced braces/angle brackets.
 
 In `build.yaml`: halves of a split keyboard built from different keymaps, a
-KEYMAP_FILE that names a file that is not there, a part the vendor builds that
-your entry leaves out, and two entries writing the same file into firmware.zip.
+leftover KEYMAP_FILE, a part the vendor builds that your entry leaves out, and
+two entries producing the same firmware file.
 
 Text in, findings out: `check_file()` and `check_build_list()` print a report
 and return 1 if they found any ERROR. Neither writes anything - they print the
-line to add, and you edit and push.
+line to add, and you edit.
 
 Usage:
     python3 -m vilemk.check config/eyelash_sofle.keymap [--keys 64]
@@ -32,9 +32,9 @@ import re
 import sys
 from typing import NamedTuple
 
-from . import keypos
+from . import PROJECT_DIR, keypos
 from .keypos import NODE_OPEN_RE, prop_value, strip_comments
-from .keymap import (BuildEntry, WORKSPACE_RE, find_build_yaml, parse_build_yaml,
+from .keymap import (WORKSPACE_RE, find_build_yaml, parse_build_yaml,
                      read_text, split_half, vendor_build_entries)
 
 # label -> #binding-cells, for behaviors ZMK defines in behaviors.dtsi / dt-bindings.
@@ -753,13 +753,12 @@ def check_file(path, args) -> int:
 #
 # `build.yaml` decides what actually gets built; the keymap checks above never
 # see it. Everything here is the second half of that: read the build list, the
-# vendor's own build list from the CLI cache, and `config/`, and report the
-# mistakes that otherwise cost a ten-minute GitHub Actions round-trip ending in
-# a compiler error that names nothing useful.
+# vendor's own build list from `.zmk/modules`, and `config/`, and report the
+# mistakes that otherwise cost a firmware build ending in a compiler error that
+# names nothing useful.
 #
 # Read-only, like every other tool here. It prints the line to add; the user
-# edits and pushes. The whole failure class comes from `zmk keyboard add`
-# rewriting `build.yaml`, so a fixer would be one more thing rewriting it.
+# edits.
 
 # A shield whose name says "screen". Dropping one of these is the common
 # deliberate choice (a board sold with and without a display), so it is checked
@@ -810,43 +809,6 @@ def _conf_turns_off(board: str, symbol: str):
     return None
 
 
-def _fallback_note(entry: BuildEntry) -> str:
-    """What ZMK does when the file a `cmake-args` line names is not there.
-
-    It stops looking at `cmake-args` and searches `config/` by board name, so a
-    typo does not fail the build - it quietly ships the CLI's default keymap.
-    """
-    for cand in dict.fromkeys([
-            os.path.join("config", f"{entry.board}.keymap"),
-            os.path.join("config", f"{split_half(entry.board)[0]}.keymap")]):
-        if os.path.isfile(cand):
-            return (f"the build falls back to looking `{entry.board}` up by name and "
-                    f"quietly ships `{cand}` instead of yours")
-    return (f"the build falls back to looking `{entry.board}` up by name, and there is "
-            "no keymap in config/ under that name either")
-
-
-def _half_of(entry: BuildEntry):
-    """Which half of a split this entry is, and the name that says so.
-
-    A split board carries it on `board:` (`eyelash_sofle_left`); a split shield
-    on a generic controller carries it on `shield:` (`corne_left`).
-    """
-    _base, half = split_half(entry.board)
-    if half:
-        return half, entry.board
-    for s in entry.shields:
-        _sbase, shalf = split_half(s)
-        if shalf:
-            return shalf, s
-    return None, entry.board
-
-
-def _shown(entry: BuildEntry) -> str:
-    raw = entry.keymap_file()
-    return f"`{os.path.basename(raw)}`" if raw else "whatever ZMK finds by board name"
-
-
 def check_build_list(args) -> int:
     """Check `build.yaml` against the vendor's build list and against `config/`.
 
@@ -864,47 +826,16 @@ def check_build_list(args) -> int:
     vendor = vendor_build_entries(zmk_dir)
     notes = []
 
-    # ---- the two halves of a split keyboard must build the same keymap -------
-    groups = {}
-    for e in entries:
-        half, _who = _half_of(e)
-        if not half:
-            continue
-        key = (split_half(e.board)[0],
-               tuple(sorted(split_half(s)[0] for s in e.shields)),
-               e.get("snippet") or "")
-        groups.setdefault(key, {}).setdefault(half, []).append(e)
-
-    for _key, halves in sorted(groups.items()):
-        if len(halves) < 2:
-            continue
-        first = None
-        for _half, es in sorted(halves.items()):
-            for e in es:
-                if first is None:
-                    first = e
-                elif e.keymap_path() != first.keymap_path():
-                    rep.error(e.at("cmake-args"),
-                              f"`{_half_of(e)[1]}` builds {_shown(e)} but "
-                              f"`{_half_of(first)[1]}` builds {_shown(first)} — the two "
-                              "halves of a split keyboard must name the same keymap, "
-                              "spelled identically")
-
-    # ---- KEYMAP_FILE must exist, and must be absolute ------------------------
+    # ---- KEYMAP_FILE: the build supplies it, so any here is dead -------------
     for e in entries:
         raw = e.keymap_file()
         if raw is None:
             continue
-        rel = e.keymap_path()
-        if not WORKSPACE_RE.search(raw):
-            rep.warn(e.at("cmake-args"),
-                     f"KEYMAP_FILE `{raw}` is a relative path; the build does not always "
-                     f"run from the directory you would expect — write it as "
-                     f'"${{GITHUB_WORKSPACE}}/{rel}"')
-        if rel and not os.path.isfile(rel):
-            rep.error(e.at("cmake-args"),
-                      f"KEYMAP_FILE names `{rel}`, which is not in the repo — "
-                      + _fallback_note(e))
+        why = ("`${GITHUB_WORKSPACE}` is a GitHub Actions path and is not set here; "
+               if WORKSPACE_RE.search(raw) else "")
+        rep.warn(e.at("cmake-args"),
+                 f"KEYMAP_FILE `{raw}`: {why}building a variant names its own keymap "
+                 "and drops this flag, so it has no effect — remove it")
 
     # ---- parts the vendor builds that your entry leaves out -------------------
     # The vendor's *default* entry per board: the first plain one. A `snippet:`
@@ -945,22 +876,19 @@ def check_build_list(args) -> int:
                      f"that is not there. Add the shield back, or put "
                      f"`CONFIG_ZMK_DISPLAY=n` in config/{e.board}.conf")
 
-    # ---- two entries writing the same file into firmware.zip -----------------
+    # ---- two entries writing the same firmware file --------------------------
     outputs = {}
     for e in entries:
         outputs.setdefault(e.artifact(), []).append(e)
     for name, es in sorted(outputs.items()):
         if len(es) > 1 and name:
             rep.error(es[1].pos,
-                      f"{len(es)} entries all build `{name}` — they collide inside "
-                      "firmware.zip and only one survives. Give the extra ones an "
+                      f"{len(es)} entries all build `{name}` — they write the same "
+                      "firmware file and only one survives. Give the extra ones an "
                       "`artifact-name:`")
 
     # ---- keymaps in config/ that nothing builds ------------------------------
-    named = {e.keymap_path() for e in entries if e.keymap_path()}
     for km in sorted(glob.glob(os.path.join("config", "*.keymap"))):
-        if os.path.normpath(km) in named:
-            continue
         stem = os.path.basename(km)[: -len(".keymap")].lower()
         matching = [e for e in entries
                     if stem in {e.board.lower(), split_half(e.board)[0].lower()}
@@ -968,9 +896,6 @@ def check_build_list(args) -> int:
         if not matching:
             notes.append(f"{km} is built by nothing in {rep.path}, and its name matches "
                          "no board or shield — parked on purpose, or a typo")
-        elif all(e.keymap_file() for e in matching):
-            notes.append(f"{km} matches `{matching[0].board}` by name, but every entry "
-                         "for it names a KEYMAP_FILE, so it is never built")
 
     # ---- report --------------------------------------------------------------
     print(f"\n{'=' * 72}\n{rep.path}\n{'=' * 72}")
@@ -1005,13 +930,10 @@ def main() -> int:
     ap.add_argument("--zmk", help="path to the ZMK cache (default ./.zmk)")
     ap.add_argument("--no-build-list", action="store_true",
                     help="skip the build.yaml checks (keymaps only)")
-    keypos.add_repo_argument(ap)
     args = ap.parse_args()
 
-    repo, how = keypos.find_config_repo(args.repo)
-    targets = [keypos.resolve_path_arg(k, repo) for k in args.keymap]
-    os.chdir(repo)
-    print(f"# repo: {repo}  (found via {how})")
+    targets = [os.path.abspath(k) if os.path.exists(k) else k for k in args.keymap]
+    os.chdir(PROJECT_DIR)
 
     if not targets:
         targets = (sorted(glob.glob("config/*.keymap"))

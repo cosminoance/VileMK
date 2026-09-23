@@ -10,7 +10,7 @@ standard library, bound to loopback, with a handful of JSON endpoints over the
 
 Endpoints:
     GET    /...                   the app from `dist/` (see below)
-    GET    /api/state             keymaps + custom items + repo info
+    GET    /api/state             keymaps + custom items + project path
     GET    /api/export/<name>     one variant's keymap, records manifest embedded
     POST   /api/viledance         save one (JSON body, `name` required)
     POST   /api/macro             save one (a list of steps)
@@ -46,7 +46,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .. import check, custom, keymap, keypos
+from .. import PROJECT_DIR, check, custom, keymap, keypos
 
 EMIT = {"viledance": custom.emit_viledance, "combo": custom.emit_combo,
         "modifier": custom.emit_modifier, "layer": custom.emit_layer,
@@ -71,17 +71,16 @@ CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript",
           ".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp",
           ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2"}
 
-REPO, HOW, QUIET = ".", "", False
+QUIET = False
 
 
 class Args:
     """The subset of the keymap collector's and checker's options the server needs."""
-    def __init__(self, repo=None):
+    def __init__(self):
         self.zmk = ".zmk"
         self.root = []
         self.include = []
         self.all = False
-        self.repo = repo
         self.keys = None
 
 
@@ -130,12 +129,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.path = self.path.split("?", 1)[0].split("#", 1)[0]
         if self.path == "/api/state":
-            data = keymap.collect_data(Args(REPO))
+            data = keymap.collect_data(Args())
             data["custom"] = custom.load_everything()
             for km in data["keymaps"]:
                 km["parts"] = _parts(km)
-            data["repo_path"] = REPO
-            data["repo_found_via"] = HOW
+            data["repo_path"] = PROJECT_DIR
             # `live` is what makes the write controls render at all.
             data["live"] = True
             return self._send(200, data)
@@ -315,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
                        for k, d in (rec.get("assignments") or {}).items()}
         new_layers = [{"name": nl.get("name") or ""}
                       for nl in (rec.get("new_layers") or [])]
-        data = keymap.collect_data(Args(REPO))
+        data = keymap.collect_data(Args())
         km = next((k for k in data["keymaps"] if k["id"] == base_id), None)
         if km is None:
             return self._send(400, {"error": f"no keymap with id {base_id!r}"})
@@ -344,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
                 text = header + text
             path, build_path, notes = custom.write_variant(
                 name, text, keyboard=km.get("keyboard") or "",
-                zmk_dir=Args(REPO).zmk, reset=bool(rec.get("reset")),
+                zmk_dir=Args().zmk, reset=bool(rec.get("reset")),
                 parts=_parts_choice(rec.get("parts")))
         except (custom.EmitError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
@@ -390,8 +388,8 @@ class Handler(BaseHTTPRequestHandler):
         if not known:
             return self._send(400, {"error":
                 f"this keymap is for {board or 'an unknown keyboard'}, which is not "
-                f"in this config repo. Add it first (zmk keyboard add {board}) - "
-                f"without its physical layout there is nothing to import into."})
+                f"added to this project. Add it first - without its physical layout "
+                f"there is nothing to import into."})
 
         plan, scope_on, errors = _import_plan(
             _incoming(text), rec.get("choices") or {}, rec.get("renames") or {})
@@ -427,12 +425,12 @@ class Handler(BaseHTTPRequestHandler):
                 out, [], {}, store["viledance"], store["combo"], store["layer"],
                 macros=store["macro"], scope=scope)
             path, build_path, more = custom.write_variant(
-                name, out, keyboard=board, zmk_dir=Args(REPO).zmk,
+                name, out, keyboard=board, zmk_dir=Args().zmk,
                 reset=bool(rec.get("reset")))
         except (custom.EmitError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
 
-        km, _combos, stopped = check.check_text(path, out, Args(REPO))
+        km, _combos, stopped = check.check_text(path, out, Args())
         return self._send(200, {
             "wrote": _rel(path), "build": _rel(build_path),
             "folder": _rel(os.path.dirname(path)),
@@ -467,7 +465,7 @@ def _resolve_board(text: str, filename: str):
             while sep in names[-1]:
                 names.append(names[-1].rsplit(sep, 1)[0])
 
-    args = Args(REPO)
+    args = Args()
     roots = keypos.search_roots(args.root, args.zmk)
     layouts, transforms, chosen = keypos.collect(roots)
     for n in names:
@@ -550,7 +548,7 @@ def _parts(km) -> list:
         return []
     own = (os.path.join(os.path.dirname(km["path"]), "build.yaml")
            if km["kind"] == "variant" else "")
-    return custom.parts_for(km["keyboard"], Args(REPO).zmk, own)
+    return custom.parts_for(km["keyboard"], Args().zmk, own)
 
 
 def _parts_choice(raw):
@@ -649,7 +647,7 @@ def run(host: str = "127.0.0.1", port: int = PORT, open_browser: bool = True) ->
 # --------------------------------------------------------------------- command
 
 def main() -> int:
-    global REPO, HOW, QUIET
+    global QUIET
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=PORT,
@@ -658,13 +656,11 @@ def main() -> int:
                     help="loopback by default; changing this exposes a write API")
     ap.add_argument("--no-open", action="store_true", help="do not launch a browser")
     ap.add_argument("--quiet", action="store_true")
-    keypos.add_repo_argument(ap)
     args = ap.parse_args()
 
     QUIET = args.quiet
-    REPO, HOW = keypos.find_config_repo(args.repo)
-    os.chdir(REPO)
-    print(f"# repo: {REPO}  (found via {HOW})")
+    os.chdir(PROJECT_DIR)
+    print(f"# project: {PROJECT_DIR}")
     print(f"# store: {custom.CUSTOM_DIR}")
     return run(args.host, args.port, open_browser=not args.no_open)
 

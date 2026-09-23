@@ -103,9 +103,8 @@ export function ImportDialog() {
         {!imp.known
           ? <>
               <div className="warn">
-                <code>{imp.board}</code> is not in this config repo. Add it with{" "}
-                <code>zmk keyboard add {imp.board}</code> first: without its
-                physical layout there is nothing to import into.
+                <code>{imp.board}</code> is not added to this project. Add it
+                first: without its physical layout there is nothing to import into.
               </div>
               <div className="rowbtns"><button className="ghost" onClick={close}>
                 Close

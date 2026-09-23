@@ -22,65 +22,33 @@ editor from the QMK world that inspired this project. Vial is a potion bottle;
 VileMK is vile, as in ruthless. There is no live USB protocol. You write
 devicetree and validate it locally before it reaches CI.
 
-This repo holds only the tools. The firmware sources live in the config repo
-created by the [`zmk` CLI](https://zmk.dev/docs/zmk-cli), and every tool here
-finds that repo on its own:
+## Where things live
+
+Everything is in this checkout. Only the code is committed; the rest is
+yours and gitignored:
+
+| path | what it is |
+|---|---|
+| `config/` | `west.yml` (which ZMK and which keyboard modules), your keymaps and `.conf` files |
+| `build.yaml` | the board and shield combinations your keyboards build |
+| `.zmk/` | board data fetched from ZMK and from keyboard modules |
+| `custom/` | the VileDances, macros, combos, modifiers and layers you design |
+| `variants/` | saved keymaps, each with the `build.yaml` that builds it |
+
+Adding a keyboard from inside the app is not built yet. Until it is, a
+keyboard comes from an existing ZMK config repo: copy its `config/`,
+`build.yaml` and `.zmk/` into this checkout.
+
+Then run the server and modify the mappings:
 
 ```bash
-zmk config user.home                        # where the CLI keeps it
-zmk config user.home /path/to/zmk-config    # point the tools somewhere else
+make design
 ```
 
-To override that for one run, pass `--repo PATH` or set `$ZMK_CONFIG`. Every
-tool prints the repo it picked as its first line.
-
-Nothing here writes to the config repo. Keymap edits go to `config/*.keymap`
-there; firmware is built by GitHub Actions on push to that repo.
-
-## Working in tandem with the ZMK config repo
-
-VileMK is the second half of a two-repo setup. The first half is ZMK's own,
-done as ZMK's docs describe. VileMK starts where the CLI stops.
-
-1. **Install the ZMK CLI and create the config repo.** [Installing
-   ZMK](https://zmk.dev/docs/user-setup) covers installing the CLI and running
-   `zmk init`, which creates the config repo on GitHub, clones it, and wires
-   up the GitHub Actions workflow that builds firmware on every push.
-
-2. **Add your keyboard.** [Keyboard
-   management](https://zmk.dev/docs/zmk-cli#keyboard-management) covers both
-   kinds:
-   - A keyboard ZMK itself defines: run `zmk keyboard add` and pick it from
-     the list.
-   - A keyboard defined in a vendor's repository (an external module, as with
-     the Eyelash Sofle): the same command takes the vendor's repo, adds it to
-     `config/west.yml`, and downloads it into `.zmk/modules/`.
-
-   Either way the CLI ends by adding entries to `build.yaml` and copying a
-   default keymap into `config/`.
-
-3. **Push once and flash the default firmware.** Optional. A passing build
-   before any custom keymap confirms the setup itself is sound.
-
-4. **Run the VileMK server and modify the mappings:**
-
-   ```bash
-   make design
-   ```
-
-   No flags, no keymap argument. The server finds the config repo and loads
-   the keymap `zmk keyboard add` installed into `config/`, drawn on its real
-   key positions. Click keys to reassign them; design VileDances, macros,
-   combos, modifiers and layers on top.
-
-5. **Save your work as a variant and hand it back.** **Save as new variant**
-   writes the modified keymap and a matching `build.yaml` under `variants/`
-   in this repo, never into the config repo. Copying it across and pushing is
-   a manual step, covered in
-   ["Putting a variant on the keyboard"](#putting-a-variant-on-the-keyboard).
-
-The ZMK CLI sets up and builds. Mappings change in the VileMK server, and
-`variants/` carries them back.
+It loads the keymaps in `config/`, drawn on their real key positions. Click
+keys to reassign them; design VileDances, macros, combos, modifiers and
+layers on top. **Save as new variant** writes the modified keymap and a
+matching `build.yaml` under `variants/`. `config/` is never written.
 
 ## Requirements
 
@@ -99,7 +67,7 @@ page saying the app is not built yet, that is the command it is asking for.
 
 Optionally, `pyproject.toml` installs the three tools as commands
 (`vilemk-keypos`, `vilemk-check`, `vilemk-design`), so they work
-from inside the config repo without a path to this one:
+from any directory:
 
 ```bash
 uv tool install --editable .    # or: pip install -e .
@@ -315,9 +283,8 @@ against; flip it on for others yourself.
 #### Saving
 
 Every design above is written to `custom/` as you work, independent of any
-keymap. Nothing reaches a keymap file until you save a variant, covered in
-["Save your work as a variant and hand it
-back"](#working-in-tandem-with-the-zmk-config-repo) above. Only the generated
+keymap. Nothing reaches a keymap file until you save a variant, see
+["Where things live"](#where-things-live) above. Only the generated
 behaviors your keys, VileDances and combos actually reference are written;
 anything designed but never bound stays out of the file.
 
@@ -336,16 +303,15 @@ make clean
 
 Pass extra flags through `ARGS`, e.g. `make check ARGS="config/corne.keymap"`.
 
-`make` only looks for a Makefile in the current directory; it has none of the
-repo-finding logic the tools do. From anywhere else, point it here:
+`make` only looks for a Makefile in the current directory. From anywhere else,
+point it here:
 
 ```bash
 make -C ~/git/VileMK          # or: make -C ~/git/VileMK check
 ```
 
 Or run `make install` once and use `vilemk-design`, `vilemk-check` and
-`vilemk-keypos` directly; those find the config repo on their own, from any
-directory.
+`vilemk-keypos` directly, from any directory.
 
 ## variants/
 

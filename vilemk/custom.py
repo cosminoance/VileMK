@@ -1088,7 +1088,7 @@ def variant_dir(name: str) -> str:
 
 def variant_path(name: str) -> str:
     """The keymap inside that folder. Named after the variant, so it keeps its
-    identity when copied into the config repo's `config/`."""
+    identity when the build stages it beside `config/`."""
     fn = variant_slug(name)
     return os.path.join(VARIANT_DIR, fn, f"{fn}.keymap")
 
@@ -1102,11 +1102,10 @@ def legacy_variant_path(name: str) -> str:
 # ------------------------------------------------- the variant's own build.yaml
 #
 # A variant folder is a bundle: the keymap, and the one build list that builds
-# it. Copy the keymap into the config repo's `config/` and this file over the
-# repo's `build.yaml`, and the keyboard builds that keymap and nothing else.
+# it. The build adds `-DKEYMAP_FILE` for the keymap, so the entries carry none.
 #
-# The entries are not invented. They are the repo's own entries for this
-# keyboard with the `KEYMAP_FILE` swapped, so a split keeps both halves, a
+# The entries are not invented. They are the project's own entries for this
+# keyboard with any `KEYMAP_FILE` dropped, so a split keeps both halves, a
 # `shield:` survives, and a ZMK Studio entry keeps its snippet and its extra
 # cmake flags. Only when the repo has no entry at all do we fall back to the
 # vendor's build list, and only when that is missing too do we guess.
@@ -1281,24 +1280,18 @@ def _reset_body(boards):
     return [head] + body
 
 
-def _with_keymap_file(cmake_args: str, keymap_rel: str) -> str:
-    """Point an entry's cmake-args at our keymap, keeping every other flag."""
-    flag = f'-DKEYMAP_FILE="${{GITHUB_WORKSPACE}}/{keymap_rel}"'
-    if not cmake_args:
-        return flag
-    if keymap.KEYMAP_FILE_RE.search(cmake_args):
-        # a callable replacement: no backslash/group escaping in the path
-        return keymap.KEYMAP_FILE_RE.sub(lambda _m: flag, cmake_args, count=1)
-    return f"{cmake_args} {flag}"
+def _without_keymap_file(cmake_args: str) -> str:
+    """Drop any `-DKEYMAP_FILE`: the build names the variant's keymap itself."""
+    return " ".join(keymap.KEYMAP_FILE_RE.sub("", cmake_args).split())
 
 
 def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
                    keymap_text: str = "", reset: bool = False, parts=None):
     """-> (build.yaml text, warnings) for one keyboard and one keymap.
 
-    Reads the config repo, so the caller must already be `chdir`-ed into it -
-    every command here does that early. Reads only: nothing in the config repo
-    is written, and this text lands in `variants/<name>/build.yaml`.
+    Reads the project, so the caller must already be `chdir`-ed into it -
+    every command here does that early. Reads only: nothing in `config/` or
+    `build.yaml` is written, and this text lands in `variants/<name>/build.yaml`.
 
     `keymap_text` is the keymap the entries will build: the feature-gated
     behaviors it binds decide which `FEATURE_FLAGS` the entries carry.
@@ -1312,7 +1305,6 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
     (`parts_for()`): ticked ones are kept or added, unticked ones dropped. None
     keeps the source entries' shields as they are.
     """
-    keymap_rel = f"config/{keymap_name}"
     warnings, source = [], ""
     feature_flags, studio = _feature_flags(keymap_text)
     if feature_flags:
@@ -1342,7 +1334,7 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
                 f"the source build list has `shield: {RESET_SHIELD}` entries and "
                 "this one does not - tick `include reset` to keep them")
     if picked:
-        source = f"the repo's own {own}"
+        source = f"the project's own {own}"
     else:
         vendor = [e for e in keymap.vendor_build_entries(zmk_dir)
                   if not e.get("snippet") and not e.get("artifact-name")
@@ -1367,7 +1359,8 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
         if studio:
             body.append(f"    snippet: {STUDIO_SNIPPET}")
         args = _add_flags("", feature_flags + ([STUDIO_FLAG] if studio else []))
-        body.append(f"    cmake-args: {_with_keymap_file(args, keymap_rel)}")
+        if args:
+            body.append(f"    cmake-args: {args}")
         if reset:
             body += _reset_body([keyboard])
         return _build_yaml_text(keyboard, keymap_name, head, body), warnings
@@ -1411,7 +1404,7 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
                 lines.append(f"{'  - ' if not lines else '    '}{key}: {value}")
         if not lines:
             continue
-        args = e.get("cmake-args") or ""
+        args = _without_keymap_file(e.get("cmake-args") or "")
         if parts is not None:
             # the ticked parts decide the display, not a flag left over from before
             args = DISPLAY_FLAG_RE.sub("", args).strip()
@@ -1419,7 +1412,8 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
                           feature_flags
                           + ([STUDIO_FLAG] if studio and central else [])
                           + ([DISPLAY_OFF_FLAG] if display_off else []))
-        lines.append(f"    cmake-args: {_with_keymap_file(args, keymap_rel)}")
+        if args:
+            lines.append(f"    cmake-args: {args}")
         block = "\n".join(lines)
         if block not in seen:            # the same half twice is one entry
             seen.add(block)
@@ -1434,8 +1428,7 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
                 "flash those first to wipe a keymap ZMK Studio stored in flash, then "
                 "the firmware, then re-pair")
 
-    head = (f"# Entries taken from {source},\n"
-            "# with the KEYMAP_FILE changed"
+    head = (f"# Entries taken from {source}"
             + (",\n# plus the flags for the feature-gated behaviors the keymap"
                "\n# binds - a bound behavior only works when its feature is"
                "\n# compiled in.\n" if feature_flags or studio else ".\n"))
@@ -1445,13 +1438,8 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
 def _build_yaml_text(keyboard, keymap_name, head, body) -> str:
     return (
         f"# The build list for the `{keyboard}` variant in this folder.\n"
-        "# Written by VileMK - read-only against your config repo.\n"
-        "#\n"
-        "# To use it: copy\n"
-        f"#     {keymap_name}\n"
-        "# into the config repo's `config/`, and this file over the repo's own\n"
-        "# `build.yaml`. Every entry names the keymap explicitly, so ZMK builds\n"
-        "# this one rather than whatever `config/<board>.keymap` happens to hold.\n"
+        "# Written by VileMK. Building the variant builds every entry below\n"
+        f"# with {keymap_name}; the build adds -DKEYMAP_FILE itself.\n"
         "#\n"
         + head
         + "---\n"
@@ -1462,7 +1450,7 @@ def _build_yaml_text(keyboard, keymap_name, head, body) -> str:
 def delete_variant(name: str) -> bool:
     """Remove `variants/<name>/`, or the flat `variants/<name>.keymap` an older
     version wrote. `variant_dir()` is what keeps this inside our own directory -
-    the config repo is never written, let alone deleted from.
+    `config/` is never written, let alone deleted from.
 
     Only the two files a variant is made of are removed, and the folder only if
     that empties it. Anything else you put in there is yours and survives.

@@ -46,7 +46,7 @@ export function App() {
       </main>
     );
   if (!data)
-    return <main className="boot"><h1>VileMK</h1><p>Reading the config repo…</p></main>;
+    return <main className="boot"><h1>VileMK</h1><p>Reading the project…</p></main>;
 
   return <StoreProvider data={data}><Shell /></StoreProvider>;
 }

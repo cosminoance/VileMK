@@ -1,4 +1,4 @@
-"""Physical layouts, matrix transforms, and where the config repo is.
+"""Physical layouts and matrix transforms.
 
 Key positions are the indices used by `key-positions` (combos),
 `hold-trigger-key-positions` (positional hold-taps) and the order of a layer's
@@ -9,10 +9,6 @@ the command that prints them.
 
 Search roots (first that exist): ./boards, ./config, ./.zmk/modules/*,
 ./.zmk/zmk/app/boards, ./.zmk/zmk/app/dts/layouts, plus --zmk/--root.
-
-`find_config_repo()` and `add_repo_argument()` also live here: every command
-starts by locating the repo the same way ($ZMK_CONFIG, an explicit --repo, a
-config/west.yml above the cwd, or the ZMK CLI's `zmk config user.home`).
 
 Usage:
     python3 -m vilemk.keypos                    # every keymap in ./config
@@ -27,6 +23,8 @@ import argparse
 import os
 import re
 import sys
+
+from . import PROJECT_DIR
 
 DTS_SUFFIXES = (".dtsi", ".dts", ".overlay", ".keymap")
 
@@ -452,105 +450,6 @@ def keymaps_in_config():
     return out
 
 
-# ---------------------------------------------------------------- repo location
-
-def _cli_home():
-    """The `user.home` setting from the ZMK CLI's own config file, if any.
-
-    The CLI stores it in `zmk.ini` under the platform app dir (on Linux
-    ~/.config/zmk/zmk.ini), overridable with $ZMK_CLI_CONFIG. Read directly so
-    these tools do not depend on the CLI being installed.
-    """
-    import configparser
-    candidates = []
-    env = os.environ.get("ZMK_CLI_CONFIG")
-    if env:
-        candidates.append(env)
-    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    candidates += [
-        os.path.join(xdg, "zmk", "zmk.ini"),
-        os.path.expanduser("~/Library/Application Support/zmk/zmk.ini"),
-        os.path.expandvars(r"%APPDATA%\zmk\zmk.ini"),
-    ]
-    for path in candidates:
-        if path and os.path.isfile(path):
-            parser = configparser.ConfigParser()
-            try:
-                parser.read(path)
-                home = parser.get("user", "home", fallback=None)
-            except configparser.Error:
-                continue
-            if home:
-                return os.path.expanduser(home), path
-    return None, None
-
-
-def is_config_repo(path) -> bool:
-    """The ZMK CLI's own test: a config repo is a directory with config/west.yml."""
-    return os.path.isfile(os.path.join(path, "config", "west.yml"))
-
-
-def find_config_repo(explicit=None):
-    """Locate the ZMK config repo. Returns (path, how_we_found_it).
-
-    Order: --repo, $ZMK_CONFIG, the nearest repo at or above the working
-    directory (what the CLI does), then the CLI's own `user.home` setting.
-    """
-    if explicit:
-        path = os.path.abspath(os.path.expanduser(explicit))
-        if not is_config_repo(path):
-            raise SystemExit(f"{path} is not a ZMK config repo (no config/west.yml)")
-        return path, "--repo"
-
-    env = os.environ.get("ZMK_CONFIG")
-    if env:
-        path = os.path.abspath(os.path.expanduser(env))
-        if not is_config_repo(path):
-            raise SystemExit(f"$ZMK_CONFIG={path} is not a ZMK config repo")
-        return path, "$ZMK_CONFIG"
-
-    here = os.path.abspath(os.curdir)
-    while True:
-        if is_config_repo(here):
-            return here, "current directory"
-        parent = os.path.dirname(here)
-        if parent == here:
-            break
-        here = parent
-
-    home, ini = _cli_home()
-    if home and is_config_repo(home):
-        return home, f"zmk config user.home ({ini})"
-    if home:
-        raise SystemExit(
-            f'zmk config user.home points at "{home}", which has no config/west.yml.\n'
-            'Run: zmk config user.home /path/to/zmk-config')
-    raise SystemExit(
-        "No ZMK config repo found. Run this inside one, pass --repo PATH, set "
-        "$ZMK_CONFIG, or set it in the CLI with: zmk config user.home /path/to/zmk-config")
-
-
-def resolve_path_arg(arg, repo):
-    """A path typed on the command line may be relative to the working
-    directory or to the config repo (`config/foo.keymap` typed from your own
-    project directory). Prefer whichever exists."""
-    if not arg:
-        return arg
-    here = os.path.abspath(arg)
-    if os.path.exists(here):
-        return here
-    there = os.path.join(repo, arg)
-    if os.path.exists(there):
-        return os.path.abspath(there)
-    return here
-
-
-def add_repo_argument(ap):
-    ap.add_argument("--repo", metavar="PATH",
-                    help="the ZMK config repo (default: $ZMK_CONFIG, the current "
-                         "directory, or the CLI's `zmk config user.home`)")
-
-
 # ---------------------------------------------------------------- main
 
 def report(target_name, keymap_path, roots, layouts, transforms, chosen, args):
@@ -615,18 +514,16 @@ def main() -> int:
     ap.add_argument("--zmk", help="path to the ZMK cache (default ./.zmk)")
     ap.add_argument("--root", action="append", default=[],
                     help="extra directory to search (repeatable)")
-    add_repo_argument(ap)
     args = ap.parse_args()
 
-    repo, how = find_config_repo(args.repo)
-    if args.target and args.target.endswith(".keymap"):
-        args.target = resolve_path_arg(args.target, repo)
-    os.chdir(repo)
-    print(f"# repo: {repo}  (found via {how})\n")
+    if args.target and args.target.endswith(".keymap") and os.path.exists(args.target):
+        args.target = os.path.abspath(args.target)
+    os.chdir(PROJECT_DIR)
 
     roots = search_roots(args.root, args.zmk)
     if not roots:
-        print("no search roots found — run this from the config repo root", file=sys.stderr)
+        print(f"no search roots found under {PROJECT_DIR} — is .zmk/ fetched?",
+              file=sys.stderr)
         return 1
     layouts, transforms, chosen = collect(roots)
 
