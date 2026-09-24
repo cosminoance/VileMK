@@ -48,6 +48,7 @@ pre.dts{background:var(--bg);border:1px solid var(--line);border-radius:6px;
 .dropmenu button:hover,.dropmenu button:focus-visible{background:var(--accent-soft);
   color:var(--accent);outline:none}
 .dropmenu button.danger{color:var(--danger)}
+.dropmenu.end{left:auto;right:0}
 button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
 .tdlist{display:flex;flex-wrap:wrap;gap:6px}
 .pk.td{width:auto;height:auto;min-height:38px;padding:4px 12px;align-items:flex-start;

@@ -43,6 +43,10 @@ Endpoints:
                                   returns the plan and writes nothing
     DELETE /api/keyboard/<id>     drop its build.yaml entries and config/ files
                                   (`?files=0` keeps the files)
+    DELETE /api/vendor/<id>?source=S  take a keyboard out of the project: its
+                                  build.yaml entries, config/ files, and its module
+                                  once nothing else in build.yaml uses it. 409 with
+                                  `variants` while variants build it
     POST   /api/build             start building one variant ({name}); with
                                   `reset` (and `parts`) it rewrites the variant's
                                   build.yaml from those choices first
@@ -344,6 +348,17 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[:2] == ["api", "module"]:
             try:
                 r = keyboards.remove_module(parts[2], zmk_dir=Args().zmk)
+            except workspace.Busy as exc:
+                return self._send(409, {"error": str(exc)})
+            except (keyboards.KeyboardError, workspace.WorkspaceError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(200, r)
+        if len(parts) == 3 and parts[:2] == ["api", "vendor"]:
+            source = (parse_qs(query).get("source") or ["zmk"])[0]
+            try:
+                r = keyboards.remove_vendor(parts[2], source, zmk_dir=Args().zmk)
+            except keyboards.InUse as exc:
+                return self._send(409, {"error": str(exc), "variants": exc.variants})
             except workspace.Busy as exc:
                 return self._send(409, {"error": str(exc)})
             except (keyboards.KeyboardError, workspace.WorkspaceError) as exc:

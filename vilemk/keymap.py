@@ -524,6 +524,30 @@ def vendor_note(path):
             else "board default")
 
 
+def _tree(entries, zmk_dir):
+    """A vendor keymap that is a catalog keyboard's own gets `board` ({id, source},
+    what removing it takes out). A module's other keymaps of the same name, such as
+    the one in its `config/`, get `parent`: that keyboard's entry id."""
+    from . import workspace
+
+    own = {os.path.normpath(os.path.join(e["dir"], e["id"] + ".keymap")): e
+           for e in workspace.catalog(zmk_dir) if e["keymap"]}
+    mods = os.path.normpath(os.path.join(zmk_dir, "modules")) + os.sep
+    parents = {}
+    for e in entries:
+        c = own.get(os.path.normpath(e["path"])) if e["kind"] == "vendor" else None
+        e["board"] = {"id": c["id"], "source": c["source"]} if c else None
+        e["parent"] = None
+        if c:
+            parents[(c["source"], c["id"])] = e["id"]
+    for e in entries:
+        path = os.path.normpath(e["path"])
+        if e["kind"] != "vendor" or e["board"] or not path.startswith(mods):
+            continue
+        source = path[len(mods):].split(os.sep)[0]
+        e["parent"] = parents.get((source, e["name"]))
+
+
 def layout_payload(layout):
     return {
         "label": layout.label,
@@ -586,6 +610,7 @@ def collect_data(args):
             **data,
         })
 
+    _tree(entries, args.zmk)
     order = {"variant": 0, "vendor": 1}
     entries.sort(key=lambda e: (order.get(e["kind"], 3), e["name"], e["path"]))
     return {

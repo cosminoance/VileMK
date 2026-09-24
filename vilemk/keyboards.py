@@ -306,6 +306,48 @@ def remove(kid: str, files: bool = True, zmk_dir: str = workspace.ZMK_DIR) -> di
             "deleted": gone}
 
 
+class InUse(KeyboardError):
+    """A removal refused because variants still build the keyboard."""
+
+    def __init__(self, what: str, variants: list):
+        super().__init__(f"{what} is used by {', '.join(variants)}; delete those "
+                         f"variants first")
+        self.variants = variants
+
+
+def variants_using(names: set) -> list:
+    """Names of the variants whose build.yaml builds any of `names`."""
+    out = []
+    for path in sorted(glob.glob(os.path.join(custom.VARIANT_DIR, "*", "build.yaml"))):
+        if _entries_of(names, keymap.parse_build_yaml(keymap.read_text(path))):
+            out.append(os.path.basename(os.path.dirname(path)))
+    return out
+
+
+def remove_vendor(kid: str, source: str, zmk_dir: str = workspace.ZMK_DIR) -> dict:
+    """Take a keyboard out of the project: its build.yaml entries and `config/`
+    files, and its module when no other keyboard in build.yaml comes from it.
+    Refused, naming them, while a variant builds the keyboard."""
+    entry = _find(kid, source, zmk_dir)
+    users = variants_using(_names(entry))
+    if users:
+        raise InUse(kid, users)
+    r = {"id": kid, "entries": 0, "deleted": [], "module": None}
+    path = keymap.find_build_yaml()
+    built = keymap.parse_build_yaml(keymap.read_text(path)) if path else []
+    if _entries_of(_names(entry), built) or _config_files(kid):
+        r.update(remove(kid, zmk_dir=zmk_dir))
+    if source != "zmk":
+        built = keymap.parse_build_yaml(keymap.read_text(path)) if path else []
+        still = [e["id"] for e in workspace.catalog(zmk_dir)
+                 if e["source"] == source and e["type"] in ("board", "shield")
+                 and _entries_of(_names(e), built)]
+        if not still:
+            remove_module(source, zmk_dir)
+            r["module"] = source
+    return r
+
+
 def remove_module(name: str, zmk_dir: str = workspace.ZMK_DIR) -> dict:
     """Uninstall a module, refused while `build.yaml` or a variant still builds one
     of its keyboards: both would stop building, and the variant would lose its

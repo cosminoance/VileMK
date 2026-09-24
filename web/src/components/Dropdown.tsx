@@ -3,9 +3,11 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 export type DropItem = { label: ReactNode; onPick: () => void; danger?: boolean };
 
 /** A button that opens a short list of actions under it. Closes on a pick,
- *  a click elsewhere, or Escape. */
-export function Dropdown({ label, items, className = "act" }:
-    { label: ReactNode; items: DropItem[]; className?: string }) {
+ *  a click elsewhere, or Escape. An icon-only button passes `title` (its name)
+ *  and `caret={false}`; `end` aligns the menu to the button's right edge. */
+export function Dropdown({ label, items, className = "act", title, caret = true, end }:
+    { label: ReactNode; items: DropItem[]; className?: string; title?: string;
+      caret?: boolean; end?: boolean }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);
   const id = useId();
@@ -27,11 +29,12 @@ export function Dropdown({ label, items, className = "act" }:
   return (
     <span className="drop" ref={box}>
       <button className={className} aria-haspopup="menu" aria-expanded={open}
-              aria-controls={id} onClick={() => setOpen(!open)}>
-        {label} <span className="caret">{"▾"}</span>
+              aria-controls={id} title={title} aria-label={title}
+              onClick={(e) => { e.stopPropagation(); setOpen(!open); }}>
+        {label}{caret && <> <span className="caret">{"▾"}</span></>}
       </button>
       {open &&
-        <div className="dropmenu" role="menu" id={id}>
+        <div className={"dropmenu" + (end ? " end" : "")} role="menu" id={id}>
           {items.map((it, i) => (
             <button key={i} role="menuitem" className={it.danger ? "danger" : ""}
                     onClick={() => { setOpen(false); it.onPick(); }}>

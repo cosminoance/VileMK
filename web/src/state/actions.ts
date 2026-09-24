@@ -2,7 +2,7 @@
 // trip. The server's reply carries the whole `custom/` store back on every
 // write, which is why so many of these end in one `store` dispatch.
 
-import type { Dispatch } from "react";
+import { createElement, type Dispatch } from "react";
 
 import { ask } from "../components/Confirm";
 import { api } from "../lib/api";
@@ -138,10 +138,39 @@ export async function deleteVariant(s: State, d: D, km: any) {
   try {
     const r = await api("DELETE", `/api/variant/${encodeURIComponent(km.name)}`);
     const fresh = await api("GET", "/api/state");
-    d({ t: "deletedVariant", data: fresh,
+    d({ t: "deletedKeymap", data: fresh,
         store: fresh.custom || r.custom || s.store, kmId: km.id,
         msg: { text: `deleted variants/${km.name}/` } });
   } catch (e) { d({ t: "msg", msg: bad(e) }); }
+}
+
+// A vendor default's Delete takes its keyboard out of the project: the
+// build.yaml entries, its `config/` files, and its module once nothing else in
+// build.yaml comes from it (`keyboards.remove_vendor()`). The server refuses
+// while a variant builds the keyboard, and names them in `variants`.
+export async function deleteVendor(s: State, d: D, km: any) {
+  const b = km.board;
+  if (!b) return;
+  const mod = b.source === "zmk" ? ""
+    : `, and the ${b.source} module is removed once no other keyboard uses it`;
+  if (!await ask({ title: `Delete ${km.name}?`, ok: "Delete", danger: true,
+                   body: `Its entries leave build.yaml${mod}. `
+                     + "You can add it again with Add a keyboard." })) return;
+  try {
+    const r = await api("DELETE", `/api/vendor/${encodeURIComponent(b.id)}`
+                                  + `?source=${encodeURIComponent(b.source)}`);
+    const fresh = await api("GET", "/api/state");
+    d({ t: "deletedKeymap", data: fresh, store: fresh.custom || s.store, kmId: km.id,
+        msg: { text: `deleted ${km.name}` + (r.module ? ` and module ${r.module}` : "") } });
+  } catch (e) {
+    const used: string[] = (e as any).body?.variants || [];
+    if (!used.length) return d({ t: "msg", msg: bad(e) });
+    await ask({ info: true, title: `${km.name} is still used`,
+                body: createElement("div", null,
+                  "Delete these variations first:",
+                  createElement("ul", null,
+                    used.map((n) => createElement("li", { key: n }, n)))) });
+  }
 }
 
 // ------------------------------------------------------------ share and import

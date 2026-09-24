@@ -82,6 +82,13 @@ twice, each marked:
 - **vendor's firmware** is the keymap in the vendor's own `config/`, the one
   their released firmware is built from. It can differ from the board
   default. The Eyelash Sofle's has a fourth layer, left empty as a spare.
+  It is listed one step in, under the board default.
+
+The gear beside each row has **Export as picture**, and **Delete** on a
+variation or on a keyboard's board default. Deleting a keyboard removes its
+`build.yaml` entries and, for a keyboard from a module, the module. It is
+refused while variations use the keyboard, and the dialog names them; delete
+those first.
 
 Keymaps in `config/` are not listed. A variation's build names its own
 keymap, so ZMK never compiles one from `config/`.

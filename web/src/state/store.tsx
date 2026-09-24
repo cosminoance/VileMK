@@ -115,7 +115,7 @@ export type Action =
   | { t: "addLayer"; kmId: string; name: string; at: number }
   | { t: "savedVariant"; data: any; store: any; id: string | null;
       kmId: string; msg: Msg | null }
-  | { t: "deletedVariant"; data: any; store: any; kmId: string; msg: Msg | null }
+  | { t: "deletedKeymap"; data: any; store: any; kmId: string; msg: Msg | null }
   | { t: "imp"; imp: Importing | null }
   | { t: "impPatch"; patch: Partial<Importing> }
   | { t: "imported"; data: any; store: any; id: string | null; msg: Msg | null };
@@ -224,7 +224,7 @@ export function reducer(s: State, a: Action): State {
       return { ...s, data: a.data, store: a.store, msg: a.msg,
                assign: {}, ...(a.id ? { id: a.id, layer: 0, layout: 0 } : {}) };
 
-    case "deletedVariant": {
+    case "deletedKeymap": {
       const newLayers = { ...s.newLayers };
       delete newLayers[a.kmId];
       return { ...s, data: a.data, store: a.store, msg: a.msg,

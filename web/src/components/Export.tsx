@@ -1,6 +1,7 @@
-// "Export as…" - the board as a picture, with the keymap's name, the VileMK
-// wordmark and as many layers as are ticked. It hangs off a row in the
-// sidebar, so any keymap in the list exports without being opened first.
+// "Export as picture" - the board as a picture, with the keymap's name, the
+// VileMK wordmark and as many layers as are ticked. It opens from a row's
+// settings menu in the sidebar (`KeymapMenu`), so any keymap in the list
+// exports without being opened first.
 //
 // A picture of a layer that is not on screen still has to be drawn, so the
 // dialog renders one off-screen <Board> per ticked layer and hands those SVG
@@ -17,24 +18,13 @@ import { slugify } from "../lib/keymaps";
 import { layersOf, type Layer } from "../lib/layers";
 import { useStore } from "../state/store";
 import { Board } from "./Board";
-import { PictureIcon } from "./Icons";
 import { Toggle } from "./Toggle";
 import { Modal } from "./Modal";
 
 const caption = (l: Layer, i: number) =>
   `${i} · ${l.display}${l.reserved ? " (reserved)" : ""}`;
 
-export function ExportButton({ km }: { km: any }) {
-  const [open, setOpen] = useState(false);
-  return <>
-    <button className="xbtn" title={`Export ${km.name} as an image`}
-            aria-label={`Export ${km.name} as an image`}
-            onClick={(e) => { e.stopPropagation(); setOpen(true); }}><PictureIcon /></button>
-    {open && <ExportDialog km={km} close={() => setOpen(false)} />}
-  </>;
-}
-
-function ExportDialog({ km, close }: { km: any; close: () => void }) {
+export function ExportDialog({ km, close }: { km: any; close: () => void }) {
   const { s, d } = useStore();
   // The dialog opens on a row, not on the page: everything the board needs
   // comes off `km`, and only the keymap that *is* on screen carries pending

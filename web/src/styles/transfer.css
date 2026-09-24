@@ -32,11 +32,13 @@ aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
   border:1px solid var(--line);font-size:11px;white-space:pre-wrap;
   word-break:break-word}
 
-/* A sidebar row is a name that selects plus the export handle. The handle is
+/* A sidebar row is a name that selects plus its settings button. The button is
    quiet until the row is hovered, focused or selected: it is one control per
-   keyboard in a list that is mostly read. */
+   keyboard in a list that is mostly read. A `.child` row (a module's config/
+   keymap) sits one step in under its keyboard. */
 aside .kbrow{display:flex;align-items:center;gap:2px}
 aside .kbrow > button{flex:1;min-width:0}
+aside .kbrow.child{margin-left:12px;padding-left:6px;border-left:1px solid var(--line)}
 aside .kbrow .xbtn{flex:none;width:26px;padding:6px 0;text-align:center;
   color:var(--muted);font-size:14px;opacity:0}
 aside .kbrow:hover .xbtn,aside .kbrow:focus-within .xbtn,

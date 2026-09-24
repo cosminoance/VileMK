@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { openImport } from "../state/actions";
 import { LIVE, useStore } from "../state/store";
-import { ExportButton } from "./Export";
+import { KeymapMenu } from "./KeymapMenu";
 import { KeyboardsButton } from "./Keyboards";
 import { ImportButton } from "./Transfer";
 
@@ -11,6 +11,21 @@ const KINDS: Record<string, string> = {
   vendor: "Vendor defaults",
 };
 
+/** A keymap with a `parent` (a module's `config/` keymap) goes right under
+ *  that keyboard's own keymap, one level in; with its parent filtered out it
+ *  stands alone. */
+function tree(rows: any[]) {
+  const shown = new Set(rows.map((k) => k.id));
+  const out: any[] = [];
+  for (const k of rows) {
+    if (k.parent && shown.has(k.parent)) continue;
+    out.push(k);
+    for (const c of rows)
+      if (c.parent === k.id) out.push({ ...c, child: true });
+  }
+  return out;
+}
+
 export function Sidebar() {
   const { s, d } = useStore();
   const [over, setOver] = useState(false);
@@ -18,8 +33,8 @@ export function Sidebar() {
   const groups = (["variant", "vendor"] as const)
     .map((kind) => ({
       kind,
-      rows: s.data.keymaps.filter((k: any) => k.kind === kind &&
-        (k.name.toLowerCase().includes(q) || k.path.toLowerCase().includes(q))),
+      rows: tree(s.data.keymaps.filter((k: any) => k.kind === kind &&
+        (k.name.toLowerCase().includes(q) || k.path.toLowerCase().includes(q)))),
     }))
     .filter((g) => g.rows.length);
 
@@ -44,16 +59,17 @@ export function Sidebar() {
           ? groups.map((g) => (
               <div key={g.kind}>
                 <div className="group">{KINDS[g.kind]}</div>
-                {/* The row is a pair: the name selects, the picture icon beside it
-                    exports that keymap as a picture without opening it. */}
+                {/* The row is a pair: the name selects, the settings menu beside
+                    it exports or deletes without opening the keymap. */}
                 {g.rows.map((k: any) => (
                   <div key={k.id}
-                       className={"kbrow" + (k.id === s.id ? " sel" : "")}>
+                       className={"kbrow" + (k.child ? " child" : "")
+                                  + (k.id === s.id ? " sel" : "")}>
                     <button className={k.id === s.id ? "sel" : ""}
                             onClick={() => d({ t: "select", id: k.id })}>
                       {k.name}<small title={k.path}>{k.note ? k.note + " · " : ""}{k.path}</small>
                     </button>
-                    <ExportButton km={k} />
+                    <KeymapMenu km={k} />
                   </div>
                 ))}
               </div>

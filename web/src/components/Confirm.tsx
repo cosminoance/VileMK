@@ -4,6 +4,8 @@ import { Modal } from "./Modal";
 
 export interface Ask {
   title: string; body?: ReactNode; ok?: string; danger?: boolean;
+  /** Only an OK button: the dialog tells, it does not ask. */
+  info?: boolean;
 }
 
 type Pending = Ask & { done: (yes: boolean) => void };
@@ -33,7 +35,8 @@ export function ConfirmHost() {
       <h2>{p.title}</h2>
       {p.body && <div className="body">{p.body}</div>}
       <div className="bar actions">
-        <button className="ghost" autoFocus={p.danger} onClick={no}>Cancel</button>
+        {!p.info &&
+          <button className="ghost" autoFocus={p.danger} onClick={no}>Cancel</button>}
         <button className={p.danger ? "ghost danger" : "act"} autoFocus={!p.danger}
                 onClick={() => p.done(true)}>{p.ok ?? "OK"}</button>
       </div>
