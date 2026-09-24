@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../lib/api";
 import { useStore } from "../state/store";
+import { ask } from "./Confirm";
 import { Help } from "./Help";
 import { Modal } from "./Modal";
 
@@ -99,10 +100,11 @@ function KeyboardsSheet({ close }: { close: () => void }) {
   };
 
   const remove = async (k: Kb) => {
-    if (!confirm(`Remove ${k.name}? Its entries leave build.yaml`
-        + (k.files.length ? ` and ${k.files.join(" and ")} are deleted,`
-                          + " including any edits made to them" : "")
-        + ". Variants of it are kept."))
+    if (!await ask({ title: `Remove ${k.name}?`, ok: "Remove", danger: true,
+        body: "Its entries leave build.yaml"
+          + (k.files.length ? ` and ${k.files.join(" and ")} are deleted,`
+                            + " including any edits made to them" : "")
+          + ". Variants of it are kept." }))
       return;
     setBusy(true);
     setMsg(null);

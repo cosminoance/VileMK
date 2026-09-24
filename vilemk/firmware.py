@@ -44,7 +44,7 @@ import sys
 import threading
 import time
 
-from . import PROJECT_DIR, custom, keymap
+from . import PROJECT_DIR, custom, keymap, keypos
 from .workspace import WEST_YML
 
 IMAGE = "zmkfirmware/zmk-build-arm:stable"
@@ -118,8 +118,33 @@ def artifact_name(board: str, shield: str, name: str = "") -> str:
     return name or f"{shield + '-' if shield else ''}{board}-zmk"
 
 
-def targets(name: str) -> list:
-    """Every entry of the variant's build.yaml, as the build will run it.
+def build_yaml(name: str, zmk_dir: str, reset: bool, parts=None) -> str:
+    """The build.yaml the variant gets with these choices, from its saved keymap.
+
+    The page's "include reset" and parts boxes apply to the next build without
+    a save; `JOB.start(yaml_text=)` writes this before it builds.
+    """
+    path = custom.variant_path(name)
+    try:
+        text = keymap.read_text(path)
+    except OSError:
+        raise BuildError(f"there is no variant named {name}") from None
+    m = keypos.KEYBOARD_HINT_RE.search(text)
+    if not m:
+        raise BuildError(f"variants/{name}/ does not say which keyboard it is for; "
+                         f"save the variant again")
+    try:
+        out, _warnings = custom.build_yaml_for(
+            m.group(1), os.path.basename(path), zmk_dir, keymap_text=text,
+            reset=reset, parts=parts)
+    except (custom.EmitError, ValueError) as exc:
+        raise BuildError(str(exc)) from None
+    return out
+
+
+def targets(name: str, yaml_text: str | None = None) -> list:
+    """Every entry of the variant's build.yaml (or `yaml_text`), as the build
+    will run it.
 
     Any `KEYMAP_FILE` the entry carries is dropped (older variants name a
     `${GITHUB_WORKSPACE}` path) and the variant's own keymap is named instead,
@@ -130,11 +155,12 @@ def targets(name: str) -> list:
     build = os.path.join(folder, "build.yaml")
     if not os.path.isfile(custom.variant_path(name)):
         raise BuildError(f"there is no variant named {name}")
-    if not os.path.isfile(build):
+    if yaml_text is None and not os.path.isfile(build):
         raise BuildError(f"variants/{name}/ has no build.yaml; save the variant "
                          f"again to write one")
     out, seen = [], set()
-    for e in keymap.parse_build_yaml(keymap.read_text(build)):
+    text = keymap.read_text(build) if yaml_text is None else yaml_text
+    for e in keymap.parse_build_yaml(text):
         if not e.board:
             raise BuildError(f"an entry in variants/{name}/build.yaml has no board")
         shield = e.get("shield") or ""
@@ -169,6 +195,22 @@ def firmware_files(name: str) -> list:
     if not os.path.isdir(folder):
         return []
     return sorted(f for f in os.listdir(folder) if f.endswith(OUTPUTS))
+
+
+def open_folder(name: str) -> None:
+    """Show the variant's firmware folder in the system's file manager."""
+    folder = os.path.abspath(firmware_dir(name))
+    if not os.path.isdir(folder):
+        raise BuildError(f"{name} has not been built yet")
+    if sys.platform == "win32":
+        os.startfile(folder)
+        return
+    cmd = ["open" if sys.platform == "darwin" else "xdg-open", folder]
+    try:
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        raise BuildError(f"no {cmd[0]} on this machine; the folder is {folder}") from None
 
 
 # ------------------------------------------------------------------- stage
@@ -309,8 +351,11 @@ class Job:
                     "files": list(self.files),
                     "started": self.started, "finished": self.finished}
 
-    def start(self, name: str, echo=None) -> None:
-        """Check, stage and launch in a thread. Raises before anything runs."""
+    def start(self, name: str, echo=None, yaml_text: str | None = None) -> None:
+        """Check, stage and launch in a thread. Raises before anything runs.
+
+        `yaml_text` replaces the variant's build.yaml first (`build_yaml()`).
+        """
         name = custom.variant_slug(name)
         with self.lock:
             if self.state == "running":
@@ -321,7 +366,11 @@ class Job:
         if _container_running():
             raise Busy(f"a {CONTAINER} container is already running, probably "
                        f"from another VileMK; stop it with `docker kill {CONTAINER}`")
-        tgts = targets(name)
+        tgts = targets(name, yaml_text)
+        if yaml_text is not None:
+            with open(os.path.join(custom.variant_dir(name), "build.yaml"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(yaml_text)
         root = stage(name)
         with self.lock:
             self.state, self.variant = "running", name

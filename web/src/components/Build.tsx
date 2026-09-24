@@ -24,6 +24,7 @@ type Job = {
   targets?: string[];
   problem?: string;
   folder?: string;
+  path?: string;
   docker?: { ok: boolean; reason: string };
 };
 
@@ -89,36 +90,46 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
           </Help>
         </>}
         <span className="buildgo">
-          <BuildButton km={km} dirty={dirty} off={!own || noDocker} />
+          <BuildButton km={km} dirty={dirty} off={!own || noDocker}
+                       reset={reset} parts={parts} />
         </span>
       </div>
       {note && <div className="warn">{note}</div>}
-      <div className="hint">These go into the variant's build.yaml when you save.</div>
+      <div className="hint">These go into the variant's build.yaml when you save or build.</div>
     </Fold>
   );
 }
 
-function BuildButton({ km, dirty, off }: { km: any; dirty: number; off: boolean }) {
+type Choices = { reset: boolean; parts: Record<string, boolean> };
+
+function BuildButton({ km, dirty, off, ...choices }:
+    { km: any; dirty: number; off: boolean } & Choices) {
   const [open, setOpen] = useState(false);
   return <>
     <button className="act" disabled={off} onClick={() => setOpen(true)}>
       Build firmware
     </button>
-    {open && <BuildSheet name={km.name} dirty={dirty} close={() => setOpen(false)} />}
+    {open && <BuildSheet name={km.name} dirty={dirty} choices={choices}
+                         close={() => setOpen(false)} />}
   </>;
 }
 
-function BuildSheet({ name, dirty, close }:
-    { name: string; dirty: number; close: () => void }) {
+function BuildSheet({ name, dirty, choices, close }:
+    { name: string; dirty: number; choices: Choices; close: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const next = useRef(0);
   const log = useRef<HTMLPreElement>(null);
   const stick = useRef(true);
+  const [copied, setCopied] = useState(false);
 
+  // `reset` and `parts` make the listed targets the ones the build will run,
+  // saved or not.
   const q = (since: number, full: boolean) =>
-    `/api/build?since=${since}` + (full ? `&variant=${encodeURIComponent(name)}` : "");
+    `/api/build?since=${since}` + (full ? `&variant=${encodeURIComponent(name)}`
+      + `&reset=${choices.reset ? 1 : 0}`
+      + `&parts=${encodeURIComponent(JSON.stringify(choices.parts))}` : "");
 
   const pull = async (full: boolean) => {
     const r: Job = await api("GET", q(next.current, full));
@@ -152,11 +163,26 @@ function BuildSheet({ name, dirty, close }:
     setErr(null);
     try {
       next.current = 0;
-      const r: Job = await api("POST", "/api/build", { name });
+      const r: Job = await api("POST", "/api/build", { name, ...choices });
       setLines(r.lines);
       next.current = r.next;
       setJob((prev) => ({ ...prev, ...r }));
     } catch (e: any) { setErr(e.message); }
+  };
+
+  const openFolder = async () => {
+    setErr(null);
+    try { await api("POST", "/api/build/open", { name }); }
+    catch (e: any) { setErr(e.message); }
+  };
+
+  const copyPath = async () => {
+    setErr(null);
+    try {
+      await navigator.clipboard.writeText(job!.path!);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e: any) { setErr(`could not copy: ${e.message}`); }
   };
 
   const cancel = async () => {
@@ -186,7 +212,7 @@ function BuildSheet({ name, dirty, close }:
       {!!job?.targets?.length &&
         <div className="bar">
           <span className="path">builds</span>
-          {job.targets.map((t) => <code key={t} className="path">{t}</code>)}
+          {job.targets.map((t) => <code key={t} className="next">{t}</code>)}
           <Help label="what the build does">
             Every entry in <code>variants/{name}/build.yaml</code>, compiled in
             ZMK's build container against <code>config/</code> and the ZMK commit
@@ -215,9 +241,12 @@ function BuildSheet({ name, dirty, close }:
       {err && <div className="msg bad">{err}</div>}
 
       {!!job?.files?.length && !running &&
-        <ul className="files">
-          {job.files.map((f) => <li key={f}><code>{f}</code></li>)}
-        </ul>}
+        <FileList files={job.files} targets={job.targets || []}>
+          <button className="ghost sm" onClick={openFolder}>Open folder</button>
+          <button className="ghost sm" disabled={!job.path} onClick={copyPath}>
+            {copied ? "Copied" : "Copy path"}
+          </button>
+        </FileList>}
 
       <div className="rowbtns">
         {running && mine
@@ -232,6 +261,36 @@ function BuildSheet({ name, dirty, close }:
         </button>
       </div>
     </Modal>
+  );
+}
+
+/** What is in the firmware folder now, against what the next build writes:
+ *  a file a target rebuilds is amber, like the target; one no target makes
+ *  any more is removed when the next build publishes. `children` are the
+ *  folder actions, at the bottom where the eye is when a build ends. */
+function FileList({ files, targets, children }:
+    { files: string[]; targets: string[]; children: React.ReactNode }) {
+  const next = new Set(targets);
+  const stem = (f: string) => f.replace(/\.[^.]+$/, "");
+  const gone = files.some((f) => !next.has(stem(f)));
+  return (
+    <div className="files">
+      <div className="bar">
+        <span className="path">existing files</span>
+        <Help label="what the colours mean">
+          Amber files are rebuilt by the next build.
+          {gone && " Struck-out files are removed by it, since the current choices no longer build them."}
+        </Help>
+        <span className="push folderbtns">{children}</span>
+      </div>
+      <ul>
+        {files.map((f) => (
+          <li key={f}>
+            <code className={next.has(stem(f)) ? "next" : "gone"}>{f}</code>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

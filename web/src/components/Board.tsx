@@ -3,7 +3,8 @@
 // board coordinates that point is `((rx-x0)*S, (ry-y0)*S)`, which is what
 // `rotate(deg cx cy)` takes.
 
-import type { RefObject } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
 
 import { resolveBinding } from "../lib/labels";
 
@@ -101,8 +102,22 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
                         sel, editing, onKey, svgRef }: BoardProps) {
   const keys: number[][] = lay.keys;
   const { x0, y0, w, h } = bounds(keys);
+  const [peek, setPeek] = useState<Peek | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  return (
+  const enter = (e: MouseEvent<SVGGElement>, p: Omit<Peek, "x" | "y">) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setPeek({
+      ...p,
+      x: Math.min(Math.max(r.left + r.width / 2, TIP_W / 2 + 8), window.innerWidth - TIP_W / 2 - 8),
+      y: r.bottom + 6,
+    }), 100);
+  };
+  const leave = () => { window.clearTimeout(timer.current); setPeek(null); };
+
+  return (<>
     <svg ref={svgRef} className="board" width={w * S + PAD} height={h * S + PAD}
          viewBox={`0 0 ${w * S + PAD} ${h * S + PAD}`}>
       <g transform={`translate(${PAD / 2} ${PAD / 2})`}>
@@ -144,8 +159,12 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
         return (
           <g key={i} className={cls.join(" ")}
              transform={rot ? `rotate(${rot / 100} ${(rx - x0) * S} ${(ry - y0) * S})` : undefined}
-             onClick={onKey ? () => onKey(i) : undefined}>
-            <title>{tip}</title>
+             onClick={onKey ? () => { leave(); onKey(i); } : undefined}
+             onMouseEnter={diff ? (e) => enter(e, {
+               pos: i, now: b, nowFull: res ? res.full : "",
+               was: old!, wasFull: oldRes ? oldRes.full : "" }) : undefined}
+             onMouseLeave={diff ? leave : undefined}>
+            {!diff && <title>{tip}</title>}
             <rect x={x} y={y} width={W} height={H} rx={5} />
             {nums && <text className="pos" x={x + 3} y={y + 9}>{i}</text>}
             {res?.hint &&
@@ -170,5 +189,37 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
       })}
       </g>
     </svg>
+    {peek && createPortal(<DiffTip {...peek} />, document.body)}
+  </>);
+}
+
+const TIP_W = 280;
+
+interface Peek {
+  pos: number;
+  now: string | undefined;
+  nowFull: string;
+  was: string;
+  wasFull: string;
+  x: number;
+  y: number;
+}
+
+function DiffTip({ pos, now, nowFull, was, wasFull, x, y }: Peek) {
+  const row = (tag: string, full: string, raw: string | undefined) => (
+    <div className="difftip-row">
+      <span className="difftip-tag">{tag}</span>
+      <span>
+        {raw === undefined ? <em>nothing</em> : full || raw}
+        {raw !== undefined && full && full !== raw && <code>{raw}</code>}
+      </span>
+    </div>
+  );
+  return (
+    <div className="difftip" role="tooltip" style={{ left: x, top: y, maxWidth: TIP_W }}>
+      {row("now", nowFull, now)}
+      {row("was", wasFull, was)}
+      <div className="difftip-pos">key {pos}</div>
+    </div>
   );
 }

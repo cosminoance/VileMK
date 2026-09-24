@@ -38,9 +38,15 @@ Endpoints:
                                   returns the plan and writes nothing
     DELETE /api/keyboard/<id>     drop its build.yaml entries and config/ files
                                   (`?files=0` keeps the files)
-    POST   /api/build             start building one variant ({name})
+    POST   /api/build             start building one variant ({name}); with
+                                  `reset` (and `parts`) it rewrites the variant's
+                                  build.yaml from those choices first
+    POST   /api/build/open        open the variant's firmware folder ({name})
+                                  in the system file manager
     GET    /api/build?since=N     the build's state and its log from line N
-                                  (`variant=` names whose targets and files to list)
+                                  (`variant=` names whose targets and files to list;
+                                  `reset=0|1&parts=<json>` lists the targets those
+                                  choices would build)
     DELETE /api/build             cancel the running build
 
 The page is the React app under `dist/`, which is not in the repo - `make web`
@@ -298,13 +304,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._keyboard_add(rec)
 
         if self.path == "/api/build":
+            name = str(rec.get("name") or "")
             try:
-                firmware.JOB.start(str(rec.get("name") or ""))
+                text = (firmware.build_yaml(name, Args().zmk, bool(rec["reset"]),
+                                            _parts_choice(rec.get("parts")))
+                        if "reset" in rec else None)
+                firmware.JOB.start(name, yaml_text=text)
             except firmware.Busy as exc:
                 return self._send(409, {"error": str(exc)})
             except (firmware.BuildError, ValueError, OSError) as exc:
                 return self._send(400, {"error": str(exc)})
             return self._send(202, firmware.JOB.since(0))
+
+        if self.path == "/api/build/open":
+            try:
+                firmware.open_folder(str(rec.get("name") or ""))
+            except (firmware.BuildError, ValueError, OSError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(200, {})
 
         self._send(404, {"error": "not found"})
 
@@ -451,11 +468,17 @@ class Handler(BaseHTTPRequestHandler):
         name = (q.get("variant") or [""])[0]
         if name:
             try:
-                out["targets"] = [t["artifact"] for t in firmware.targets(name)]
+                text = None
+                if "reset" in q:
+                    parts = json.loads((q.get("parts") or ["null"])[0])
+                    text = firmware.build_yaml(name, Args().zmk,
+                                               q["reset"][0] == "1", _parts_choice(parts))
+                out["targets"] = [t["artifact"] for t in firmware.targets(name, text)]
             except (firmware.BuildError, ValueError) as exc:
                 out["targets"], out["problem"] = [], str(exc)
             out["files"] = firmware.firmware_files(name)
             out["folder"] = _rel(firmware.firmware_dir(name))
+            out["path"] = os.path.abspath(firmware.firmware_dir(name))
             out["docker"] = firmware.docker_status()
         return self._send(200, out)
 

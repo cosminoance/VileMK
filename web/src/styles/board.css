@@ -61,3 +61,17 @@ code,.mono{font-family:var(--font)}
 .warn{background:var(--warn-soft);color:var(--warn);border-radius:6px;padding:6px 10px;
   margin-bottom:10px;font-size:12px}
 .legend{color:var(--muted);font-size:12px;margin-bottom:10px}
+/* Hover card on a `.k.diff` key: the full current and previous binding, since
+   the key face and its `was` line are clipped to fit. Board.tsx portals it to
+   <body> and shows it after 100ms. */
+.difftip{position:fixed;z-index:20;transform:translateX(-50%);pointer-events:none;
+  padding:8px 10px;border:1px solid var(--diff);border-radius:6px;
+  background:var(--panel);color:var(--ink);font-family:var(--font);font-size:12px;
+  line-height:1.45;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.difftip-row{display:grid;grid-template-columns:3.2em 1fr;gap:6px;white-space:pre-wrap;
+  overflow-wrap:anywhere}
+.difftip-row + .difftip-row{margin-top:4px}
+.difftip-tag{color:var(--muted)}
+.difftip-row:nth-child(2) .difftip-tag{color:var(--diff)}
+.difftip-row code{display:block;color:var(--muted);font-size:11px}
+.difftip-pos{margin-top:6px;color:var(--muted);font-size:11px}

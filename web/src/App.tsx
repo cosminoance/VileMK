@@ -4,6 +4,7 @@ import { getState } from "./lib/api";
 import { KeymapView } from "./components/KeymapView";
 import { Sidebar } from "./components/Sidebar";
 import { VersionChip } from "./components/Changelog";
+import { ConfirmHost } from "./components/Confirm";
 import { SettingsChip } from "./components/Settings";
 import { ImportDialog } from "./components/Transfer";
 import { LIVE, StoreProvider, useStore } from "./state/store";
@@ -27,6 +28,7 @@ function Shell() {
       <KeymapView />
     </div>
     <ImportDialog />
+    <ConfirmHost />
   </>;
 }
 

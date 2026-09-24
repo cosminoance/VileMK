@@ -1,21 +1,26 @@
-:root{
-  --bg:#f6f7f9; --panel:#fff; --ink:#15181d; --muted:#69707d; --line:#dfe3ea;
-  --key:#fff; --key-line:#c8cfda; --accent:#2f6feb; --accent-soft:#e5edfd;
-  --warn:#8a5a00; --warn-soft:#fff4d9; --diff:#b8860b; --diff-soft:#fdf1cf;
-  --combo:#0a7a5a; --combo-soft:#d8f3e9;
-  --on-accent:#fff; --danger:#c0392b; --brand:#14171c;
+/* What each colour means in this app, in terms of the theme's palette names
+   (themes/*.css). A theme swap changes the palette, never these lines. They
+   sit on every [data-theme] too, so a subtree with its own theme resolves
+   them against its own palette. */
+:root,[data-theme]{
+  --bg:var(--pal-bg); --panel:var(--pal-bg-raised); --ink:var(--pal-fg);
+  --muted:var(--pal-fg-dim); --line:var(--pal-line);
+  --key:var(--pal-bg-key); --key-line:var(--pal-line-strong);
+  /* The logo's mint: the app's brand, not a palette member. */
+  --accent:#40f7bf; --on-accent:var(--pal-bg);
+  --warn:var(--pal-yellow); --diff:var(--pal-yellow-bright);
+  --combo:var(--pal-magenta); --danger:var(--pal-red);
+  --pending:var(--pal-yellow-bright);
+  --brand:var(--pal-bg);
+  /* -soft: the hue at 15% over the page, for a fill behind its own text. */
+  --accent-soft:color-mix(in srgb,var(--accent) 15%,var(--pal-bg));
+  --warn-soft:color-mix(in srgb,var(--warn) 15%,var(--pal-bg));
+  --diff-soft:color-mix(in srgb,var(--diff) 15%,var(--pal-bg));
+  --combo-soft:color-mix(in srgb,var(--combo) 15%,var(--pal-bg));
+  --pending-soft:color-mix(in srgb,var(--pending) 15%,var(--pal-bg));
   --font:"JetBrainsMono Nerd Font Mono","JetBrainsMono NFM","JetBrains Mono",ui-monospace,monospace;
 }
-@media (prefers-color-scheme:dark){
-  /* Evening in Kyoto (~/git/evening-in-kyoto-nvim) neutrals and hues; accent is the logo's mint. */
-  :root{
-    --bg:#1a1a1a; --panel:#212121; --ink:#c4c5b5; --muted:#96927f; --line:#2e2e2e;
-    --key:#262626; --key-line:#3a3a3a; --accent:#40f7bf; --accent-soft:#203b33;
-    --on-accent:#1a1a1a; --danger:#9f7887; --brand:#1a1a1a;
-    --warn:#fa8419; --warn-soft:#3c2d1a; --diff:#ff9f43; --diff-soft:#3c342e;
-    --combo:#9e7cc0; --combo-soft:#2a2530;
-  }
-}
 *{box-sizing:border-box}
-/* Native controls (checkboxes, radios, selects, scrollbars) take the scheme and the accent. */
-:root{color-scheme:light dark;accent-color:var(--accent)}
+/* Native controls (checkboxes, radios, selects, scrollbars) take the accent;
+   the theme sets color-scheme. */
+:root{accent-color:var(--accent)}

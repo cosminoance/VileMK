@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import "./styles/themes/evening-in-kyoto.css";
 import "./styles/tokens.css";
 import "./styles/shell.css";
 import "./styles/board.css";

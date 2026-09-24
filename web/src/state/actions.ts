@@ -4,9 +4,10 @@
 
 import type { Dispatch } from "react";
 
+import { ask } from "../components/Confirm";
 import { api } from "../lib/api";
 import { readTextFile, saveFile } from "../lib/download";
-import { BOARD_TABS, KIND_OF, recordOf, type Mode } from "../lib/drafts";
+import { BOARD_TABS, KIND_OF, PANEL_TITLES, recordOf, type Mode } from "../lib/drafts";
 import { scopeOf, scopeOn, slugify, byId } from "../lib/keymaps";
 import type { Action, State } from "./store";
 
@@ -41,7 +42,9 @@ export async function previewItem(d: D, mode: Mode, draft: any) {
 export async function deleteItem(d: D, mode: Mode, draft: any) {
   const kind = KIND_OF[mode];
   if (!draft.name) return;
-  if (!confirm(`Delete ${kind} "${draft.name}"?`)) return;
+  if (!await ask({ title: `Delete ${PANEL_TITLES[mode]} "${draft.name}"?`,
+                   body: "Its record is removed from custom/.",
+                   ok: "Delete", danger: true })) return;
   try {
     const r = await api("DELETE", `/api/${kind}/${encodeURIComponent(draft.name)}`);
     d({ t: "leavePanel", mode, store: r.custom,
@@ -94,7 +97,9 @@ export async function saveVariant(
   }
   if (!over
       && s.data.keymaps.some((k: any) => k.kind === "variant" && k.name === slugify(name))
-      && !confirm(`variants/${slugify(name)}/ already exists. Overwrite it?`))
+      && !await ask({ title: `variants/${slugify(name)}/ already exists`,
+                      body: "Overwrite its keymap and build.yaml?",
+                      ok: "Overwrite", danger: true }))
     return false;
   try {
     const r = await api("POST", "/api/variant",
@@ -127,8 +132,9 @@ export async function saveVariant(
 // to whatever is left.
 export async function deleteVariant(s: State, d: D, km: any) {
   if (km.kind !== "variant") return;
-  if (!confirm(`Delete variants/${km.name}/ - keymap and build.yaml? `
-               + `This cannot be undone.`)) return;
+  if (!await ask({ title: `Delete variants/${km.name}/?`,
+                   body: "Its keymap and build.yaml are deleted. This cannot be undone.",
+                   ok: "Delete", danger: true })) return;
   try {
     const r = await api("DELETE", `/api/variant/${encodeURIComponent(km.name)}`);
     const fresh = await api("GET", "/api/state");

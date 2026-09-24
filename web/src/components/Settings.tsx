@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { api } from "../lib/api";
 import { useStore } from "../state/store";
+import { ask } from "./Confirm";
 import { Help } from "./Help";
 import { Modal } from "./Modal";
 
@@ -33,9 +34,9 @@ function SettingsSheet({ close }: { close: () => void }) {
   const isDefault = url.trim() === zmk.default_url && ref.trim() === zmk.default_ref;
 
   const run = async () => {
-    if (switching && !confirm(
-        `Switch ZMK to ${url.trim()} at ${ref.trim()}? Every keyboard and variant `
-        + "here is checked and built against it."))
+    if (switching && !await ask({
+        title: `Switch ZMK to ${url.trim()} at ${ref.trim()}?`, ok: "Switch",
+        body: "Every keyboard and variant here is checked and built against it." }))
       return;
     setBusy(true);
     setMsg(null);

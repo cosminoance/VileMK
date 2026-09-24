@@ -1,5 +1,5 @@
 /* Export buttons, the export dialog, the sidebar's import target, the
-   import dialog, the settings sheet, the keyboards sheet, the build sheet and the save-as sheet, which share the modal. */
+   import dialog, the settings sheet, the keyboards sheet, the build sheet, the save-as sheet and the confirm sheet, which share the modal. */
 aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
 .impbtn{display:block;width:100%;margin:0 0 10px;text-align:center}
 
@@ -11,6 +11,9 @@ aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
 .sheet h2{margin:0;font-size:17px}
 .sheet .bar{margin-bottom:10px}
 .sheet.saveas{width:min(460px,100%)}
+.sheet.confirm{width:min(420px,100%);margin:auto 0}
+.sheet.confirm .body{margin:10px 0 0;color:var(--muted);line-height:1.5}
+.sheet.confirm .actions{justify-content:flex-end;margin:16px 0 0}
 
 .ilist{list-style:none;margin:12px 0;padding:0;display:flex;flex-direction:column;
   gap:6px}
@@ -59,8 +62,16 @@ aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
 
 /* Build: the log fills most of the sheet and follows the newest line. */
 .build pre.log{max-height:50vh;white-space:pre-wrap;word-break:break-all}
-.build .files{margin:10px 0 0;padding-left:18px;font-size:12px}
+.build .files{margin:10px 0 0;font-size:12px}
+.build .files .bar{margin:0}
+.build .files ul{margin:4px 0 0;padding-left:18px}
 .build .files li{margin:3px 0}
+.build .push{margin-left:auto}
+.build .folderbtns{display:flex;gap:6px}
+/* --pending: what the next build writes (targets, and the files it replaces). */
+.build code.next{color:var(--pending);background:var(--pending-soft);
+  border-radius:4px;padding:1px 5px}
+.build code.gone{color:var(--muted);text-decoration:line-through}
 
 /* Keyboards: the catalog scrolls inside the sheet, so the chosen keyboard's
    controller and plan stay in view under it. */
