@@ -5,8 +5,9 @@ web page exists — rendering lives in `vilemk.webui`. `collect_data()` is the
 one entry point both the static builder and the live server call.
 
 Sources, in the order they are discovered: vendor default keymaps from the
-fetched board data in `.zmk/`, your own `config/*.keymap`, and any saved
-variations in `variants/*.keymap`. Each one's physical layout is resolved
+fetched board data in `.zmk/`, and saved variations in `variants/`.
+`config/` is not read: it holds settings, and a variant build names its own
+keymap. Each one's physical layout is resolved
 through `vilemk.keypos`, so key positions are the real ones.
 """
 
@@ -469,8 +470,7 @@ def discover(zmk_dir, include=(), take_all=False):
     # A variant is a folder - `variants/<name>/<name>.keymap` beside the
     # `build.yaml` that builds it - so look one level down as well as flat.
     # Flat `.keymap` files are what earlier versions wrote, and still count.
-    for base, kind in (("config", "config"), ("variants", "variant"),
-                       ("keymaps", "variant")):
+    for base, kind in (("variants", "variant"), ("keymaps", "variant")):
         if not os.path.isdir(base):
             continue
         for fn in sorted(os.listdir(base)):
@@ -498,6 +498,8 @@ def discover(zmk_dir, include=(), take_all=False):
             for fn in sorted(files):
                 if not fn.endswith(".keymap"):
                     continue
+                if fn[:-len(".keymap")] in UTILITY_SHIELDS:
+                    continue
                 path = os.path.join(base, fn)
                 if in_tree and not take_all:
                     stem = fn[:-len(".keymap")].lower()
@@ -513,6 +515,13 @@ def discover(zmk_dir, include=(), take_all=False):
             seen.add(real)
             out.append((kind, path))
     return out
+
+
+def vendor_note(path):
+    """A module can ship two keymaps for one keyboard: the board's own fallback,
+    and the one its `config/` builds the vendor's released firmware from."""
+    return ("vendor's firmware" if "config" in path.split(os.sep)[:-1]
+            else "board default")
 
 
 def layout_payload(layout):
@@ -570,13 +579,14 @@ def collect_data(args):
             "id": f"{kind}:{path}",
             "name": stem,
             "kind": kind,
+            "note": vendor_note(path) if kind == "vendor" else "",
             "path": path,
             "keyboard": _name,
             "layouts": opts,
             **data,
         })
 
-    order = {"config": 0, "variant": 1, "vendor": 2}
+    order = {"variant": 0, "vendor": 1}
     entries.sort(key=lambda e: (order.get(e["kind"], 3), e["name"], e["path"]))
     return {
         "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),

@@ -7,6 +7,8 @@ commit), so only GitHub URLs work.
     python3 -m vilemk.workspace show
     python3 -m vilemk.workspace update zmk [--url URL] [--ref REF]
     python3 -m vilemk.workspace catalog
+    python3 -m vilemk.workspace add <github-url> [--ref REF] [--name NAME]
+    python3 -m vilemk.workspace remove <name>
 
 The pinning rule: the ref asked for is resolved to a commit once, and the commit
 is what `west.yml` records as `revision`. The ref goes in west's own `userdata`
@@ -520,6 +522,84 @@ def install_module(name: str, zmk_dir: str = ZMK_DIR) -> dict:
         _LOCK.release()
 
 
+def add_module(url: str, ref: str = "main", name: str = "",
+               zmk_dir: str = ZMK_DIR) -> dict:
+    """Fetch a module from GitHub into `.zmk/modules/<name>/` and add it to west.yml.
+
+    `name` defaults to the repository name. Resolve, fetch, write, in that
+    order: a bad URL or ref fails before anything is downloaded, and west.yml
+    only gains the project once its files are in place.
+    """
+    url = (url or "").strip().rstrip("/")
+    ref = (ref or "").strip() or "main"
+    owner, repo = parse_github(url)
+    url = f"https://github.com/{owner}/{repo}"
+    name = (name or "").strip() or repo
+    if not NAME_RE.match(name) or name == "zmk":
+        raise WorkspaceError(f"{name!r} cannot be a module name")
+    if not _LOCK.acquire(blocking=False):
+        raise Busy("another fetch is running")
+    try:
+        data = west_yml_read()
+        if project(data, name) is not None:
+            raise WorkspaceError(f"{name} is already in {WEST_YML}; update it instead")
+        for p in data["manifest"]["projects"]:
+            other = project_info(data, p.get("name", "")) if isinstance(p, dict) else {}
+            if other.get("url", "").lower().removesuffix(".git") == url.lower():
+                raise WorkspaceError(f"{url} is already in {WEST_YML} as {other['name']}")
+        sha = resolve(owner, repo, ref)
+        files = fetch(owner, repo, sha, os.path.join(zmk_dir, "modules", name))
+        _pin(data, name, url, ref, sha, path=f"modules/{name}")
+        west_yml_write(data)
+        return {**project_info(data, name), "was": "", "files": files}
+    finally:
+        _LOCK.release()
+
+
+def remove_module(name: str, zmk_dir: str = ZMK_DIR) -> dict:
+    """Drop a module from west.yml and delete `.zmk/modules/<name>/`.
+
+    Whether anything still uses it is the caller's question
+    (`keyboards.remove_module`); this only undoes `add_module`.
+    """
+    if not NAME_RE.match(name or "") or name == "zmk":
+        raise WorkspaceError(f"{name!r} is not a module name")
+    if not _LOCK.acquire(blocking=False):
+        raise Busy("another fetch is running")
+    try:
+        data = west_yml_read()
+        dest = os.path.join(zmk_dir, "modules", name)
+        listed = project(data, name) is not None
+        if not listed and not os.path.isdir(dest):
+            raise WorkspaceError(f"{name} is not in {WEST_YML}")
+        if listed:
+            data["manifest"]["projects"] = [
+                p for p in data["manifest"]["projects"]
+                if not (isinstance(p, dict) and p.get("name") == name)]
+            west_yml_write(data)
+        shutil.rmtree(dest, ignore_errors=True)
+        return {"name": name, "listed": listed}
+    finally:
+        _LOCK.release()
+
+
+def modules(zmk_dir: str = ZMK_DIR) -> list:
+    """Every project in west.yml but ZMK, with `fetched` for `.zmk/modules/<name>/`."""
+    try:
+        data = west_yml_read()
+    except (WorkspaceError, OSError, UnicodeDecodeError):
+        return []
+    out = []
+    for p in data["manifest"]["projects"]:
+        name = p.get("name", "") if isinstance(p, dict) else ""
+        if not name or name == "zmk":
+            continue
+        info = project_info(data, name)
+        info["fetched"] = os.path.isdir(os.path.join(zmk_dir, "modules", name))
+        out.append(info)
+    return out
+
+
 # ----------------------------------------------------------------- command
 
 def main() -> int:
@@ -532,6 +612,12 @@ def main() -> int:
     up.add_argument("--url", default="", help="zmk only: switch repository")
     up.add_argument("--ref", default="", help="zmk only: switch branch or tag")
     sub.add_parser("catalog", help="every *.zmk.yml in .zmk/")
+    ad = sub.add_parser("add", help="fetch a module from GitHub and add it to west.yml")
+    ad.add_argument("url")
+    ad.add_argument("--ref", default="main", help="branch, tag or commit (default main)")
+    ad.add_argument("--name", default="", help="default: the repository name")
+    rm = sub.add_parser("remove", help="drop a module from west.yml and .zmk/modules/")
+    rm.add_argument("name")
     args = ap.parse_args()
     os.chdir(PROJECT_DIR)
 
@@ -552,6 +638,12 @@ def main() -> int:
             was = r["was"][:12] if SHA_RE.match(r["was"]) else r["was"] or "nothing"
             print(f"{r['name']}: {r['ref']} -> {r['revision'][:12]} "
                   f"(was {was}), {r['files']} files")
+        elif args.cmd == "add":
+            r = add_module(args.url, args.ref, args.name)
+            print(f"{r['name']}: {r['ref']} -> {r['revision'][:12]}, {r['files']} files")
+        elif args.cmd == "remove":
+            remove_module(args.name)
+            print(f"removed {args.name}")
         else:
             for e in catalog():
                 print(f"{e['source']:<20} {e['type']:<12} {e['id']:<28}"

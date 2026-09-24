@@ -1,9 +1,10 @@
 """Adding and removing keyboards: `build.yaml` entries plus the files in `config/`.
 
 The offer is `workspace.catalog()`: every board or shield in ZMK or an installed
-module that ships a `.keymap`. Adding one copies `<id>.keymap` and `<id>.conf`
-into `config/` (never over an existing file) and appends one `build.yaml` entry
-per half. A shield also needs the controller it is soldered to, picked from the
+module that ships a `.keymap`. Adding one copies `<id>.conf`, if the vendor
+ships one, into `config/` (never over an existing file) and appends one
+`build.yaml` entry per half. The keymap stays with the vendor: variants start
+from it, and a variant build names its own keymap. A shield also needs the controller it is soldered to, picked from the
 boards whose `exposes` cover its `requires`. `west.yml` is not touched: ZMK is
 already in it, and so is an installed module.
 
@@ -11,13 +12,16 @@ already in it, and so is an installed module.
     python3 -m vilemk.keyboards add <id> [--source S] [--controller BOARD]
     python3 -m vilemk.keyboards remove <id> [--keep-files]
 
-Remove drops the keyboard's entries and its two `config/` files. It does not
-uninstall a module, and it leaves variants alone.
+Remove drops the keyboard's entries and its `config/` files (the `.conf`, and a
+`.keymap` left there by earlier versions). It does not
+uninstall a module, and it leaves variants alone. `remove_module()` uninstalls
+one, and refuses while `build.yaml` or a variant still builds its keyboards.
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import sys
 
@@ -166,11 +170,9 @@ def plan(kid: str, source: str = "", controller: str = "",
         controller = ""
     entries = entries_for(entry, controller, zmk_dir)
     copies, kept = [], []
-    for ext in (".keymap", ".conf"):
-        src = os.path.join(entry["dir"], entry["id"] + ext)
-        if not os.path.isfile(src):
-            continue
-        dst = os.path.join(CONFIG_DIR, entry["id"] + ext)
+    src = os.path.join(entry["dir"], entry["id"] + ".conf")
+    if os.path.isfile(src):
+        dst = os.path.join(CONFIG_DIR, entry["id"] + ".conf")
         (kept if os.path.exists(dst) else copies).append((src, dst))
     return {"id": entry["id"], "source": entry["source"], "controller": controller,
             "build": _build_path(), "entries": [_entry_text(e) for e in entries],
@@ -302,6 +304,26 @@ def remove(kid: str, files: bool = True, zmk_dir: str = workspace.ZMK_DIR) -> di
             gone.append(f)
     return {"id": kid, "build": path or BUILD_YAML, "entries": len(spans),
             "deleted": gone}
+
+
+def remove_module(name: str, zmk_dir: str = workspace.ZMK_DIR) -> dict:
+    """Uninstall a module, refused while `build.yaml` or a variant still builds one
+    of its keyboards: both would stop building, and the variant would lose its
+    layout."""
+    names = set()
+    for e in workspace.catalog(zmk_dir):
+        if e["source"] == name and e["type"] in ("board", "shield"):
+            names |= _names(e)
+    users = []
+    for path in [keymap.find_build_yaml() or ""] + sorted(
+            glob.glob(os.path.join(custom.VARIANT_DIR, "*", "build.yaml"))):
+        if names and os.path.isfile(path) and _entries_of(
+                names, keymap.parse_build_yaml(keymap.read_text(path))):
+            users.append(os.path.relpath(path))
+    if users:
+        raise KeyboardError(f"{name} is still used by {', '.join(users)}; remove "
+                            f"its keyboards and variants first")
+    return workspace.remove_module(name, zmk_dir)
 
 
 # ----------------------------------------------------------------- command

@@ -887,16 +887,6 @@ def check_build_list(args) -> int:
                       "firmware file and only one survives. Give the extra ones an "
                       "`artifact-name:`")
 
-    # ---- keymaps in config/ that nothing builds ------------------------------
-    for km in sorted(glob.glob(os.path.join("config", "*.keymap"))):
-        stem = os.path.basename(km)[: -len(".keymap")].lower()
-        matching = [e for e in entries
-                    if stem in {e.board.lower(), split_half(e.board)[0].lower()}
-                    or stem in {s.lower() for s in e.shields}]
-        if not matching:
-            notes.append(f"{km} is built by nothing in {rep.path}, and its name matches "
-                         "no board or shield — parked on purpose, or a typo")
-
     # ---- report --------------------------------------------------------------
     print(f"\n{'=' * 72}\n{rep.path}\n{'=' * 72}")
     for line in rep.errors:
@@ -936,11 +926,10 @@ def main() -> int:
     os.chdir(PROJECT_DIR)
 
     if not targets:
-        targets = (sorted(glob.glob("config/*.keymap"))
-                   + sorted(glob.glob("variants/*.keymap"))
+        targets = (sorted(glob.glob("variants/*.keymap"))
                    + sorted(glob.glob(os.path.join("variants", "*", "*.keymap"))))
         if not targets:
-            print("no keymaps found in config/ or variants/", file=sys.stderr)
+            print("no keymaps found in variants/", file=sys.stderr)
             return 1
     if args.keys is not None and len(targets) > 1:
         print("--keys describes one keyboard; pass a single keymap with it",

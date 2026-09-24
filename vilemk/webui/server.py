@@ -32,8 +32,13 @@ Endpoints:
                                   its `// zmk-module:` line names
     POST   /api/import            restore its records, then write variants/<name>/
     POST   /api/zmk               fetch ZMK's board data at {url, ref} and pin it
-    GET    /api/keyboards         what can be added (catalog entries with a keymap)
-                                  and the controller boards a shield can sit on
+    GET    /api/keyboards         what can be added (catalog entries with a keymap),
+                                  the controller boards a shield can sit on, and
+                                  the modules in west.yml
+    POST   /api/module            fetch a module from GitHub ({url, ref, name}) and
+                                  add it to west.yml
+    POST   /api/module/<name>     update it: resolve its ref again and refetch
+    DELETE /api/module/<name>     drop it from west.yml and .zmk/modules/
     POST   /api/keyboard          add one ({id, source, controller}); `dry: true`
                                   returns the plan and writes nothing
     DELETE /api/keyboard/<id>     drop its build.yaml entries and config/ files
@@ -156,7 +161,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/keyboards":
             kbs, boards = keyboards.offer(Args().zmk)
             return self._send(200, {"keyboards": kbs, "controllers": boards,
-                                    "default_controller": keyboards.DEFAULT_CONTROLLER})
+                                    "default_controller": keyboards.DEFAULT_CONTROLLER,
+                                    "modules": workspace.modules(Args().zmk)})
         if self.path == "/api/state":
             data = keymap.collect_data(Args())
             data["custom"] = custom.load_everything()
@@ -303,6 +309,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/keyboard":
             return self._keyboard_add(rec)
 
+        if self.path == "/api/module" or self.path.startswith("/api/module/"):
+            return self._module(rec, self.path[len("/api/module/"):])
+
         if self.path == "/api/build":
             name = str(rec.get("name") or "")
             try:
@@ -332,6 +341,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/build":
             return self._send(200, {"cancelled": firmware.JOB.cancel()})
         parts = self.path.strip("/").split("/")
+        if len(parts) == 3 and parts[:2] == ["api", "module"]:
+            try:
+                r = keyboards.remove_module(parts[2], zmk_dir=Args().zmk)
+            except workspace.Busy as exc:
+                return self._send(409, {"error": str(exc)})
+            except (keyboards.KeyboardError, workspace.WorkspaceError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(200, r)
         if len(parts) == 3 and parts[:2] == ["api", "keyboard"]:
             files = (parse_qs(query).get("files") or ["1"])[0] != "0"
             try:
@@ -435,6 +452,26 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"was": r["was"], "files": r["files"],
                                 "zmk": workspace.zmk_info()})
+
+    # --------------------------------------------------------------- module
+    def _module(self, rec, name):
+        """Add a module from GitHub, or update one by name. Blocks for the
+        download, like `_zmk`. `keyboards` counts what the module offers, so the
+        page can say when it has none VileMK can add."""
+        try:
+            if name:
+                r = workspace.install_module(name, Args().zmk)
+            else:
+                r = workspace.add_module(str(rec.get("url") or ""),
+                                         str(rec.get("ref") or ""),
+                                         str(rec.get("name") or ""), Args().zmk)
+        except workspace.Busy as exc:
+            return self._send(409, {"error": str(exc)})
+        except workspace.WorkspaceError as exc:
+            return self._send(400, {"error": str(exc)})
+        kbs, _ = keyboards.offer(Args().zmk)
+        r["keyboards"] = sum(1 for k in kbs if k["source"] == r["name"])
+        return self._send(200, r)
 
     # ------------------------------------------------------------- keyboard
     def _keyboard_add(self, rec):

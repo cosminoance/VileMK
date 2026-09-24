@@ -168,35 +168,27 @@ function MissingBoard({ board, mod }: { board: string; mod: Needed | null }) {
       </div>
       <p className="legend">
         The file does not say where the keyboard comes from. Ask whoever sent it
-        which ZMK module has the keyboard, add that module to{" "}
-        <code>config/west.yml</code>, run <code>make module ARGS=&lt;name&gt;</code>,
-        and import again.
+        which ZMK module has the keyboard, add it under <b>Add a keyboard</b> →{" "}
+        <b>Add a module from GitHub</b>, add the keyboard, and import again.
       </p>
     </>;
-  const entry = [
-    `    - name: ${mod.name}`,
-    `      url: ${mod.url}`,
-    `      path: modules/${mod.name}`,
-    `      revision: ${mod.ref || "main"}`,
-  ].join("\n");
   return <>
     <div className="msg bad">
       This keymap is for {kb}, from the vendor module <code>{mod.name}</code> (
       <code>{mod.url}</code>). {!mod.listed
-        ? "This project does not have that module. Add it, then import the file again."
+        ? "This project does not have that module."
         : !mod.fetched
-        ? "The module is in config/west.yml but has not been fetched. Fetch it, then import the file again."
-        : "The module is here but has no layout for this keyboard. Update it, then import the file again."}
+        ? "The module is in config/west.yml but has not been fetched."
+        : "The module is here but has no layout for this keyboard."}
     </div>
-    {!mod.listed && <>
-      <p className="legend">
-        1. Add it under <code>projects:</code> in <code>config/west.yml</code>:
-      </p>
-      <pre className="dts">{entry}</pre>
-    </>}
     <p className="legend">
-      {mod.listed ? "" : "2. "}{mod.fetched ? "Update it:" : "Fetch it:"}
+      {!mod.listed
+        ? <>Open <b>Add a keyboard</b>, fetch <code>{mod.url}</code> at{" "}
+            <code>{mod.ref || "main"}</code> under <b>Add a module from GitHub</b>,
+            add the keyboard, then import the file again.</>
+        : <>Open <b>Add a keyboard</b>, press {mod.fetched ? "Update" : "Fetch"} on{" "}
+            <code>{mod.name}</code> under <b>Modules</b>, then import the file
+            again.</>}
     </p>
-    <pre className="dts">make module ARGS={mod.name}</pre>
   </>;
 }

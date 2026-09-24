@@ -30,7 +30,7 @@ yours and gitignored:
 
 | path | what it is |
 |---|---|
-| `config/` | `west.yml` (which ZMK and which keyboard modules), your keymaps and `.conf` files |
+| `config/` | `west.yml` (which ZMK and which keyboard modules) and each keyboard's `.conf` settings |
 | `build.yaml` | the board and shield combinations your keyboards build |
 | `.zmk/` | board data fetched from ZMK and from keyboard modules |
 | `custom/` | the VileDances, macros, combos, modifiers and layers you design |
@@ -48,9 +48,8 @@ the same thing as a settings sheet, with an **Update** button. Leave the
 repository and branch alone unless you know you need a different ZMK: every
 keyboard and variant is checked and built against it.
 
-Adding a keyboard from inside the app is not built yet. Until it is, a
-keyboard comes from an existing ZMK config repo: copy its `config/`,
-`build.yaml` and `.zmk/` into this checkout.
+**Add a keyboard** in the sidebar lists every keyboard in ZMK and in the
+modules you have installed, and can fetch a keyboard module from GitHub.
 
 Then run the server and modify the mappings:
 
@@ -58,10 +57,34 @@ Then run the server and modify the mappings:
 make design
 ```
 
-It loads the keymaps in `config/`, drawn on their real key positions. Click
+It loads your keyboards' keymaps, drawn on their real key positions. Click
 keys to reassign them; design VileDances, macros, combos, modifiers and
 layers on top. **Save as new variant** writes the modified keymap and a
-matching `build.yaml` under `variants/`. `config/` is never written.
+matching `build.yaml` under `variants/`.
+
+### The keyboard list
+
+The sidebar has two groups.
+
+**Saved variations** are your keymaps in `variants/`. They are the only ones
+you can overwrite and build.
+
+**Vendor defaults** are the keymaps that come with a keyboard, read from
+`.zmk/`. They are for comparing against (**compare with…**) and for starting
+a new variation. They are never edited: `.zmk/` holds exactly what the
+vendor's repository has at the commit pinned in `config/west.yml`, and
+fetching the module again gives the same files.
+
+Some vendors ship two keymaps for one keyboard, so the keyboard is listed
+twice, each marked:
+
+- **board default** is the keymap ZMK falls back to when a build names none.
+- **vendor's firmware** is the keymap in the vendor's own `config/`, the one
+  their released firmware is built from. It can differ from the board
+  default. The Eyelash Sofle's has a fourth layer, left empty as a spare.
+
+Keymaps in `config/` are not listed. A variation's build names its own
+keymap, so ZMK never compiles one from `config/`.
 
 ## Requirements
 
@@ -93,8 +116,8 @@ uv tool install --editable .    # or: pip install -e .
 
 | Command | What it does |
 |---|---|
-| `python3 -m vilemk.keypos config/<board>.keymap` | Prints the key-position map for a keyboard: the numbers `key-positions` and `hold-trigger-key-positions` refer to. |
-| `python3 -m vilemk.check config/<board>.keymap` | Static validation before a build: binding counts per layer, out-of-range positions, undefined `&labels`, bad keycodes, arity, braces. It also reads `build.yaml` and flags a `KEYMAP_FILE` left in it (the build adds one), a part the vendor builds that your entry leaves out, and colliding artifact names. Pass `--no-build-list` for keymaps only. |
+| `python3 -m vilemk.keypos variants/<name>/<name>.keymap` | Prints the key-position map for a keyboard: the numbers `key-positions` and `hold-trigger-key-positions` refer to. |
+| `python3 -m vilemk.check variants/<name>/<name>.keymap` | Static validation before a build: binding counts per layer, out-of-range positions, undefined `&labels`, bad keycodes, arity, braces. It also reads `build.yaml` and flags a `KEYMAP_FILE` left in it (the build adds one), a part the vendor builds that your entry leaves out, and colliding artifact names. Pass `--no-build-list` for keymaps only. |
 | `python3 -m vilemk.firmware <variant>` | Builds a variant's firmware in Docker into `variants/<variant>/firmware/`. `--dry-run` prints the command and script without running them. |
 | `python3 -m vilemk.webui.server` | The app: every keymap drawn on its real key positions, with layer tabs, combos and a compare view, plus the editor — design VileDances, macros, combos, modifiers and layer bindings in Vial-style panels, click keys to reassign them, save to `custom/` and `variants/`, and export or import a `.keymap`. |
 
@@ -440,8 +463,8 @@ nothing to compare against.
 
 ### A worked example: Eyelash Sofle
 
-`config/` holds `eyelash_sofle.keymap`, and `config/west.yml` lists the
-`zmk-eyelash-sofle` module. In the app you design some VileDances and combos,
+`config/west.yml` lists the `zmk-eyelash-sofle` module, and the sidebar shows
+its default keymap under **Vendor defaults**. In the app you design some VileDances and combos,
 bind them, and **Save as new variant** as `eyelash_sofle_colemak`. That writes
 `variants/eyelash_sofle_colemak/` with the keymap and a `build.yaml` holding
 one entry per half.

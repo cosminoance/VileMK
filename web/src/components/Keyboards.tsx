@@ -12,11 +12,15 @@ interface Kb {
   controllers: string[]; added: boolean; files: string[];
 }
 interface Ctl { id: string; name: string; source: string }
-interface Offer { keyboards: Kb[]; controllers: Ctl[]; default_controller: string }
+interface Mod { name: string; url: string; ref: string; revision: string; fetched: boolean }
+interface Offer {
+  keyboards: Kb[]; controllers: Ctl[]; default_controller: string; modules: Mod[];
+}
 interface Plan { build: string; entries: string[]; copy: string[]; kept: string[] }
 
 const key = (k: Kb) => `${k.source}:${k.id}`;
 const from = (source: string) => source === "zmk" ? "ZMK" : source;
+const short = (sha: string) => sha.slice(0, 7);
 
 /** Sidebar button that opens the keyboard sheet. */
 export function KeyboardsButton() {
@@ -38,6 +42,8 @@ function KeyboardsSheet({ close }: { close: () => void }) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
+  const [url, setUrl] = useState("");
+  const [ref, setRef] = useState("main");
 
   const load = async () => setOffer(await api<Offer>("GET", "/api/keyboards"));
   useEffect(() => {
@@ -83,21 +89,24 @@ function KeyboardsSheet({ close }: { close: () => void }) {
     setMsg({ text });
   };
 
-  const add = async () => {
-    if (!cur) return;
+  const act = async (run: () => Promise<string>) => {
     setBusy(true);
     setMsg(null);
     try {
-      const r = await api<Plan>("POST", "/api/keyboard",
-                                { id: cur.id, source: cur.source, controller: ctl });
-      await after(`added ${cur.name}: ${r.entries.length} entries in ${r.build}`
-        + (r.copy.length ? `, copied ${r.copy.join(", ")}` : ""));
+      await after(await run());
     } catch (e: any) {
       setMsg({ text: e.message, bad: true });
     } finally {
       setBusy(false);
     }
   };
+
+  const add = () => cur && act(async () => {
+    const r = await api<Plan>("POST", "/api/keyboard",
+                              { id: cur.id, source: cur.source, controller: ctl });
+    return `added ${cur.name}: ${r.entries.length} entries in ${r.build}`
+      + (r.copy.length ? `, copied ${r.copy.join(", ")}` : "");
+  });
 
   const remove = async (k: Kb) => {
     if (!await ask({ title: `Remove ${k.name}?`, ok: "Remove", danger: true,
@@ -106,17 +115,43 @@ function KeyboardsSheet({ close }: { close: () => void }) {
                             + " including any edits made to them" : "")
           + ". Variants of it are kept." }))
       return;
-    setBusy(true);
-    setMsg(null);
-    try {
+    act(async () => {
       const r = await api("DELETE", `/api/keyboard/${encodeURIComponent(k.id)}`);
-      await after(`removed ${k.name}: ${r.entries} entries`
-        + (r.deleted.length ? `, deleted ${r.deleted.join(", ")}` : ""));
-    } catch (e: any) {
-      setMsg({ text: e.message, bad: true });
-    } finally {
-      setBusy(false);
-    }
+      return `removed ${k.name}: ${r.entries} entries`
+        + (r.deleted.length ? `, deleted ${r.deleted.join(", ")}` : "");
+    });
+  };
+
+  // A new module's keyboards are listed first in the catalog, under its name.
+  const fetchModule = () => act(async () => {
+    const r = await api("POST", "/api/module", { url: url.trim(), ref: ref.trim() });
+    setUrl("");
+    setRef("main");
+    setQ("");
+    return `added module ${r.name} at ${short(r.revision)}, ${r.files} files: `
+      + (r.keyboards
+        ? `${r.keyboards} keyboard(s), listed under "From module ${r.name}" below`
+        : "it has no keyboard VileMK can add (none with a *.zmk.yml and a"
+          + " default .keymap)");
+  });
+
+  const updateModule = (m: Mod) => act(async () => {
+    const r = await api("POST", `/api/module/${encodeURIComponent(m.name)}`);
+    return r.was === r.revision
+      ? `${m.name} is already at ${short(r.revision)}, fetched again`
+      : `${m.name}: ${r.ref} is now ${short(r.revision)}, ${r.files} files`;
+  });
+
+  const removeModule = async (m: Mod) => {
+    if (!await ask({ title: `Remove module ${m.name}?`, ok: "Remove", danger: true,
+        body: `It leaves config/west.yml and .zmk/modules/${m.name}/ is deleted.`
+          + " Refused while build.yaml or a variant still builds one of its"
+          + " keyboards." }))
+      return;
+    act(async () => {
+      await api("DELETE", `/api/module/${encodeURIComponent(m.name)}`);
+      return `removed module ${m.name}`;
+    });
   };
 
   return (
@@ -141,8 +176,51 @@ function KeyboardsSheet({ close }: { close: () => void }) {
         </ul>
       </>}
 
+      {!!offer?.modules.length && <>
+        <h3>Modules</h3>
+        <ul className="ilist">
+          {offer.modules.map((m) => (
+            <li key={m.name} className="irow">
+              <span className="nm">{m.name}</span>
+              <span className="path">
+                {m.ref || "no ref"} · {m.fetched ? short(m.revision) : "not fetched"}
+              </span>
+              <button className="ghost sm push" disabled={busy || !m.ref}
+                      onClick={() => updateModule(m)}>
+                {m.fetched ? "Update" : "Fetch"}
+              </button>
+              <button className="ghost sm danger" disabled={busy}
+                      onClick={() => removeModule(m)}>Remove</button>
+            </li>))}
+        </ul>
+      </>}
+
       {offer && <>
-        <h3>Add</h3>
+        <h3>Add a module from GitHub</h3>
+        <div className="fields">
+          <label htmlFor="mod-url">repository</label>
+          <input id="mod-url" className="kb wide" autoComplete="off" spellCheck={false}
+                 placeholder="https://github.com/owner/zmk-keyboard" value={url}
+                 disabled={busy} onChange={(e) => setUrl(e.target.value)} />
+          <label htmlFor="mod-ref">branch or tag</label>
+          <span className="bar">
+            <input id="mod-ref" className="kb" autoComplete="off" spellCheck={false}
+                   value={ref} disabled={busy} onChange={(e) => setRef(e.target.value)} />
+            <button className="act" disabled={busy || !url.trim() || !ref.trim()}
+                    onClick={fetchModule}>
+              {busy && url.trim() ? "Fetching…" : "Fetch"}
+            </button>
+            <Help label="what fetch does">
+              Resolves the branch or tag to the commit it names now, downloads the
+              repository at that commit into <code>.zmk/modules/</code>, and adds it
+              to <code>config/west.yml</code> pinned to that commit, which is what a
+              build compiles. Its keyboards then appear below. GitHub repositories
+              only.
+            </Help>
+          </span>
+        </div>
+
+        <h3>Add a keyboard</h3>
         <div className="bar">
           <input className="kb wide" placeholder="filter by name or module…" autoComplete="off"
                  spellCheck={false} value={q} onChange={(e) => setQ(e.target.value)} />
@@ -195,7 +273,7 @@ function KeyboardsSheet({ close }: { close: () => void }) {
           <p className="legend">Adds to <code>{plan.build}</code>:</p>
           <pre className="dts">{plan.entries.join("\n")}</pre>
           {plan.copy.map((f) => <p className="legend" key={f}>
-            copies its default keymap to <code>{f}</code></p>)}
+            copies its settings to <code>{f}</code></p>)}
           {plan.kept.map((f) => <p className="legend" key={f}>
             keeps <code>{f}</code>, which is already there</p>)}
         </>}

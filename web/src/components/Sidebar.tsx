@@ -7,7 +7,6 @@ import { KeyboardsButton } from "./Keyboards";
 import { ImportButton } from "./Transfer";
 
 const KINDS: Record<string, string> = {
-  config: "In this config",
   variant: "Saved variations",
   vendor: "Vendor defaults",
 };
@@ -16,7 +15,7 @@ export function Sidebar() {
   const { s, d } = useStore();
   const [over, setOver] = useState(false);
   const q = s.filter.toLowerCase();
-  const groups = (["config", "variant", "vendor"] as const)
+  const groups = (["variant", "vendor"] as const)
     .map((kind) => ({
       kind,
       rows: s.data.keymaps.filter((k: any) => k.kind === kind &&
@@ -52,7 +51,7 @@ export function Sidebar() {
                        className={"kbrow" + (k.id === s.id ? " sel" : "")}>
                     <button className={k.id === s.id ? "sel" : ""}
                             onClick={() => d({ t: "select", id: k.id })}>
-                      {k.name}<small>{k.path}</small>
+                      {k.name}<small title={k.path}>{k.note ? k.note + " · " : ""}{k.path}</small>
                     </button>
                     <ExportButton km={k} />
                   </div>

@@ -17,6 +17,8 @@
 #   make module ARGS=<name>
 #                   # fetch a keyboard module listed in config/west.yml
 #                   # into .zmk/modules/<name>/ and pin the commit
+#   make module ARGS="add <github-url> --ref main"
+#                   # add a module that is not in west.yml yet
 #   make firmware ARGS=<variant>
 #                   # build a variant's firmware in Docker, into
 #                   # variants/<variant>/firmware/
@@ -74,10 +76,10 @@ pos:
 zmk:
 	$(PY) -m vilemk.workspace update zmk $(ARGS)
 
-# Writes .zmk/modules/<name>/ and its pin in config/west.yml. The module has to
-# be listed there first.
+# Writes .zmk/modules/<name>/ and its pin in config/west.yml. A bare name updates
+# a module listed there; `add <url>` and `remove <name>` pass straight through.
 module:
-	$(PY) -m vilemk.workspace update $(ARGS)
+	$(PY) -m vilemk.workspace $(if $(filter add remove,$(firstword $(ARGS))),,update) $(ARGS)
 
 # Needs Docker. The west workspace lives in the `vilemk-zmk` volume; the first
 # run pulls the build image and all of ZMK and Zephyr.
