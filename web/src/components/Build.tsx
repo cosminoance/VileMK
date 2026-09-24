@@ -11,6 +11,7 @@ import { useStore, type State } from "../state/store";
 import { Fold } from "./Fold";
 import { Help } from "./Help";
 import { Toggle } from "./Toggle";
+import { Modal } from "./Modal";
 
 const POLL_MS = 1000;
 
@@ -167,72 +168,70 @@ function BuildSheet({ name, dirty, close }:
   const docker = job?.docker;
 
   return (
-    <div className="modal" onClick={close}>
-      <div className="sheet build" onClick={(e) => e.stopPropagation()}>
-        <div className="bar">
-          <h2>Build {name}</h2>
-          <span className="path">{job?.folder || `variants/${name}/firmware`}/</span>
-        </div>
-
-        {docker && !docker.ok &&
-          <div className="warn">Building needs Docker: {docker.reason}.</div>}
-        {job?.problem && <div className="warn">{job.problem}</div>}
-        {!!dirty &&
-          <div className="warn">
-            {dirty} unsaved change(s) are not in the build. It compiles the saved
-            variant; save it first to include them.
-          </div>}
-
-        {!!job?.targets?.length &&
-          <div className="bar">
-            <span className="path">builds</span>
-            {job.targets.map((t) => <code key={t} className="path">{t}</code>)}
-            <Help label="what the build does">
-              Every entry in <code>variants/{name}/build.yaml</code>, compiled in
-              ZMK's build container against <code>config/</code> and the ZMK commit
-              pinned in <code>config/west.yml</code>. The first build downloads
-              the container image and all of ZMK and Zephyr, which takes several
-              minutes; later ones reuse them.
-            </Help>
-          </div>}
-
-        {other && running &&
-          <div className="msg bad">{job!.variant} is building. One build runs at a time.</div>}
-
-        {mine && lines.length > 0 &&
-          <pre className="dts log" ref={log}
-               onScroll={(e) => {
-                 const el = e.currentTarget;
-                 stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-               }}>{lines.join("\n")}</pre>}
-
-        {mine && job!.state === "ok" && <FlashNote files={job!.files} />}
-        {mine && job!.state === "failed" &&
-          <div className="msg bad">The build failed; the log above says where.
-            The firmware folder is unchanged.</div>}
-        {mine && job!.state === "cancelled" &&
-          <div className="msg bad">Cancelled. The firmware folder is unchanged.</div>}
-        {err && <div className="msg bad">{err}</div>}
-
-        {!!job?.files?.length && !running &&
-          <ul className="files">
-            {job.files.map((f) => <li key={f}><code>{f}</code></li>)}
-          </ul>}
-
-        <div className="rowbtns">
-          {running && mine
-            ? <button className="ghost danger" onClick={cancel}>Cancel build</button>
-            : <button className="act"
-                      disabled={!job || running || !docker?.ok || !job.targets?.length}
-                      onClick={start}>
-                {job?.files?.length ? "Build again" : "Build"}
-              </button>}
-          <button className="ghost" onClick={close}>
-            {running ? "Close (keeps building)" : "Close"}
-          </button>
-        </div>
+    <Modal onClose={close} className="build">
+      <div className="bar">
+        <h2>Build {name}</h2>
+        <span className="path">{job?.folder || `variants/${name}/firmware`}/</span>
       </div>
-    </div>
+
+      {docker && !docker.ok &&
+        <div className="warn">Building needs Docker: {docker.reason}.</div>}
+      {job?.problem && <div className="warn">{job.problem}</div>}
+      {!!dirty &&
+        <div className="warn">
+          {dirty} unsaved change(s) are not in the build. It compiles the saved
+          variant; save it first to include them.
+        </div>}
+
+      {!!job?.targets?.length &&
+        <div className="bar">
+          <span className="path">builds</span>
+          {job.targets.map((t) => <code key={t} className="path">{t}</code>)}
+          <Help label="what the build does">
+            Every entry in <code>variants/{name}/build.yaml</code>, compiled in
+            ZMK's build container against <code>config/</code> and the ZMK commit
+            pinned in <code>config/west.yml</code>. The first build downloads
+            the container image and all of ZMK and Zephyr, which takes several
+            minutes; later ones reuse them.
+          </Help>
+        </div>}
+
+      {other && running &&
+        <div className="msg bad">{job!.variant} is building. One build runs at a time.</div>}
+
+      {mine && lines.length > 0 &&
+        <pre className="dts log" ref={log}
+             onScroll={(e) => {
+               const el = e.currentTarget;
+               stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+             }}>{lines.join("\n")}</pre>}
+
+      {mine && job!.state === "ok" && <FlashNote files={job!.files} />}
+      {mine && job!.state === "failed" &&
+        <div className="msg bad">The build failed; the log above says where.
+          The firmware folder is unchanged.</div>}
+      {mine && job!.state === "cancelled" &&
+        <div className="msg bad">Cancelled. The firmware folder is unchanged.</div>}
+      {err && <div className="msg bad">{err}</div>}
+
+      {!!job?.files?.length && !running &&
+        <ul className="files">
+          {job.files.map((f) => <li key={f}><code>{f}</code></li>)}
+        </ul>}
+
+      <div className="rowbtns">
+        {running && mine
+          ? <button className="ghost danger" onClick={cancel}>Cancel build</button>
+          : <button className="act"
+                    disabled={!job || running || !docker?.ok || !job.targets?.length}
+                    onClick={start}>
+              {job?.files?.length ? "Build again" : "Build"}
+            </button>}
+        <button className="ghost" onClick={close}>
+          {running ? "Close (keeps building)" : "Close"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

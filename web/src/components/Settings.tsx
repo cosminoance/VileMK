@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../state/store";
 import { Help } from "./Help";
+import { Modal } from "./Modal";
 
 const short = (sha: string) => sha.slice(0, 7);
 
@@ -55,60 +56,58 @@ function SettingsSheet({ close }: { close: () => void }) {
   };
 
   return (
-    <div className="modal" onClick={busy ? undefined : close}>
-      <div className="sheet settings" onClick={(e) => e.stopPropagation()}>
-        <div className="bar">
-          <h2>Settings</h2>
-          <span className="path">config/west.yml</span>
-        </div>
-
-        <h3>ZMK source</h3>
-        <div className="warn">
-          Every keyboard and variant in this project is checked and built against
-          this. Changing it can break all of them, and there is normally no reason
-          to.
-        </div>
-
-        <div className="fields">
-          <label htmlFor="zmk-url">repository</label>
-          <input id="zmk-url" className="kb wide" autoComplete="off"
-                 spellCheck={false} value={url} disabled={busy}
-                 onChange={(e) => setUrl(e.target.value)} />
-          <label htmlFor="zmk-ref">branch or tag</label>
-          <input id="zmk-ref" className="kb wide" autoComplete="off"
-                 spellCheck={false} value={ref} disabled={busy}
-                 onChange={(e) => setRef(e.target.value)} />
-          <span>commit</span>
-          <span className="path">
-            {zmk.pinned
-              ? <code>{short(zmk.revision)}</code>
-              : `not pinned yet (west.yml says ${zmk.revision || "nothing"})`}
-            {!zmk.fetched && " · board data not fetched"}
-          </span>
-        </div>
-
-        {zmk.error && <div className="msg bad">{zmk.error}</div>}
-        {msg && <div className={"msg " + (msg.bad ? "bad" : "ok")}>{msg.text}</div>}
-
-        <div className="rowbtns">
-          <button className="act" disabled={busy || !url.trim() || !ref.trim()}
-                  onClick={run}>
-            {busy ? "Fetching…" : switching ? "Switch" : "Update"}
-          </button>
-          <Help label="what update does">
-            Resolves the branch or tag to the commit it names now, downloads ZMK's
-            board data at that commit into <code>.zmk/zmk/</code>, and records the
-            commit in <code>config/west.yml</code>. A build compiles that commit.
-            GitHub repositories only.
-          </Help>
-          {!isDefault &&
-            <button className="ghost" disabled={busy}
-                    onClick={() => { setUrl(zmk.default_url); setRef(zmk.default_ref); }}>
-              Use the default
-            </button>}
-          <button className="ghost" disabled={busy} onClick={close}>Close</button>
-        </div>
+    <Modal onClose={busy ? undefined : close} className="settings">
+      <div className="bar">
+        <h2>Settings</h2>
+        <span className="path">config/west.yml</span>
       </div>
-    </div>
+
+      <h3>ZMK source</h3>
+      <div className="warn">
+        Every keyboard and variant in this project is checked and built against
+        this. Changing it can break all of them, and there is normally no reason
+        to.
+      </div>
+
+      <div className="fields">
+        <label htmlFor="zmk-url">repository</label>
+        <input id="zmk-url" className="kb wide" autoComplete="off"
+               spellCheck={false} value={url} disabled={busy}
+               onChange={(e) => setUrl(e.target.value)} />
+        <label htmlFor="zmk-ref">branch or tag</label>
+        <input id="zmk-ref" className="kb wide" autoComplete="off"
+               spellCheck={false} value={ref} disabled={busy}
+               onChange={(e) => setRef(e.target.value)} />
+        <span>commit</span>
+        <span className="path">
+          {zmk.pinned
+            ? <code>{short(zmk.revision)}</code>
+            : `not pinned yet (west.yml says ${zmk.revision || "nothing"})`}
+          {!zmk.fetched && " · board data not fetched"}
+        </span>
+      </div>
+
+      {zmk.error && <div className="msg bad">{zmk.error}</div>}
+      {msg && <div className={"msg " + (msg.bad ? "bad" : "ok")}>{msg.text}</div>}
+
+      <div className="rowbtns">
+        <button className="act" disabled={busy || !url.trim() || !ref.trim()}
+                onClick={run}>
+          {busy ? "Fetching…" : switching ? "Switch" : "Update"}
+        </button>
+        <Help label="what update does">
+          Resolves the branch or tag to the commit it names now, downloads ZMK's
+          board data at that commit into <code>.zmk/zmk/</code>, and records the
+          commit in <code>config/west.yml</code>. A build compiles that commit.
+          GitHub repositories only.
+        </Help>
+        {!isDefault &&
+          <button className="ghost" disabled={busy}
+                  onClick={() => { setUrl(zmk.default_url); setRef(zmk.default_ref); }}>
+            Use the default
+          </button>}
+        <button className="ghost" disabled={busy} onClick={close}>Close</button>
+      </div>
+    </Modal>
   );
 }

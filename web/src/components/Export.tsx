@@ -19,6 +19,7 @@ import { useStore } from "../state/store";
 import { Board } from "./Board";
 import { PictureIcon } from "./Icons";
 import { Toggle } from "./Toggle";
+import { Modal } from "./Modal";
 
 const caption = (l: Layer, i: number) =>
   `${i} · ${l.display}${l.reserved ? " (reserved)" : ""}`;
@@ -85,76 +86,74 @@ function ExportDialog({ km, close }: { km: any; close: () => void }) {
   };
 
   return (
-    <div className="modal" onClick={close}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="bar">
-          <h2>Export {km.name} as an image</h2>
-          <span className="path">{km.path}</span>
-        </div>
-
-        <label className="bar">
-          <span className="path">title on the picture</span>
-          <input className="kb wide" autoComplete="off" value={title}
-                 placeholder={km.name}
-                 onChange={(e) => setTitle(e.target.value)} />
-        </label>
-
-        <div className="bar">
-          <span className="path">layers</span>
-        </div>
-        <ul className="xlayers">
-          {layers.map((l, i) => (
-            <li key={i}>
-              <Toggle checked={chosen.includes(i)} onChange={() => toggle(i)}>
-                {caption(l, i)}
-              </Toggle>
-            </li>
-          ))}
-        </ul>
-
-        <div className="bar">
-          <Toggle checked={nums} onChange={setNums}>key positions</Toggle>
-        </div>
-
-        <div className="rowbtns">
-          <button className="act" disabled={busy || !chosen.length}
-                  onClick={run(async (sheet) => {
-                    await copySheet(sheet);
-                    return "copied as a PNG";
-                  })}>Copy image</button>
-          <button className="ghost" disabled={busy || !chosen.length}
-                  onClick={run(async (sheet) => {
-                    const png = await sheetPng(sheet);
-                    return await saveFile(`${stem}.png`, png,
-                      [{ description: "PNG image",
-                         accept: { "image/png": [".png"] } }])
-                      ? `saved ${stem}.png` : null;
-                  })}>Save PNG</button>
-          <button className="ghost" disabled={busy || !chosen.length}
-                  onClick={run(async (sheet) => {
-                    return await saveFile(`${stem}.svg`, sheetBlob(sheet),
-                      [{ description: "SVG image",
-                         accept: { "image/svg+xml": [".svg"] } }])
-                      ? `saved ${stem}.svg` : null;
-                  })}>Save SVG</button>
-          <button className="ghost" onClick={close}>Cancel</button>
-          {!chosen.length &&
-            <span className="path">tick at least one layer</span>}
-        </div>
-
-        {/* The boards the export reads. Off-screen rather than hidden: they
-            have to be laid out and styled like the real one. */}
-        <div className="offscreen" aria-hidden="true">
-          {chosen.map((i) => (
-            <Board key={i} km={km} lay={lay}
-                   bindings={layers[i].bindings} baseBindings={null}
-                   assign={mine ? (s.assign[i] || {}) : {}} nums={nums}
-                   hot={null} sel={[]} editing={null} onKey={null}
-                   svgRef={{ get current() { return boards.current[i] || null; },
-                             set current(el) { boards.current[i] = el; } }} />
-          ))}
-        </div>
+    <Modal onClose={close}>
+      <div className="bar">
+        <h2>Export {km.name} as an image</h2>
+        <span className="path">{km.path}</span>
       </div>
-    </div>
+
+      <label className="bar">
+        <span className="path">title on the picture</span>
+        <input className="kb wide" autoComplete="off" value={title}
+               placeholder={km.name}
+               onChange={(e) => setTitle(e.target.value)} />
+      </label>
+
+      <div className="bar">
+        <span className="path">layers</span>
+      </div>
+      <ul className="xlayers">
+        {layers.map((l, i) => (
+          <li key={i}>
+            <Toggle checked={chosen.includes(i)} onChange={() => toggle(i)}>
+              {caption(l, i)}
+            </Toggle>
+          </li>
+        ))}
+      </ul>
+
+      <div className="bar">
+        <Toggle checked={nums} onChange={setNums}>key positions</Toggle>
+      </div>
+
+      <div className="rowbtns">
+        <button className="act" disabled={busy || !chosen.length}
+                onClick={run(async (sheet) => {
+                  await copySheet(sheet);
+                  return "copied as a PNG";
+                })}>Copy image</button>
+        <button className="ghost" disabled={busy || !chosen.length}
+                onClick={run(async (sheet) => {
+                  const png = await sheetPng(sheet);
+                  return await saveFile(`${stem}.png`, png,
+                    [{ description: "PNG image",
+                       accept: { "image/png": [".png"] } }])
+                    ? `saved ${stem}.png` : null;
+                })}>Save PNG</button>
+        <button className="ghost" disabled={busy || !chosen.length}
+                onClick={run(async (sheet) => {
+                  return await saveFile(`${stem}.svg`, sheetBlob(sheet),
+                    [{ description: "SVG image",
+                       accept: { "image/svg+xml": [".svg"] } }])
+                    ? `saved ${stem}.svg` : null;
+                })}>Save SVG</button>
+        <button className="ghost" onClick={close}>Cancel</button>
+        {!chosen.length &&
+          <span className="path">tick at least one layer</span>}
+      </div>
+
+      {/* The boards the export reads. Off-screen rather than hidden: they
+          have to be laid out and styled like the real one. */}
+      <div className="offscreen" aria-hidden="true">
+        {chosen.map((i) => (
+          <Board key={i} km={km} lay={lay}
+                 bindings={layers[i].bindings} baseBindings={null}
+                 assign={mine ? (s.assign[i] || {}) : {}} nums={nums}
+                 hot={null} sel={[]} editing={null} onKey={null}
+                 svgRef={{ get current() { return boards.current[i] || null; },
+                           set current(el) { boards.current[i] = el; } }} />
+        ))}
+      </div>
+    </Modal>
   );
 }

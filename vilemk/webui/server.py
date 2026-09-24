@@ -32,6 +32,12 @@ Endpoints:
                                   its `// zmk-module:` line names
     POST   /api/import            restore its records, then write variants/<name>/
     POST   /api/zmk               fetch ZMK's board data at {url, ref} and pin it
+    GET    /api/keyboards         what can be added (catalog entries with a keymap)
+                                  and the controller boards a shield can sit on
+    POST   /api/keyboard          add one ({id, source, controller}); `dry: true`
+                                  returns the plan and writes nothing
+    DELETE /api/keyboard/<id>     drop its build.yaml entries and config/ files
+                                  (`?files=0` keeps the files)
     POST   /api/build             start building one variant ({name})
     GET    /api/build?since=N     the build's state and its log from line N
                                   (`variant=` names whose targets and files to list)
@@ -56,7 +62,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
-from .. import PROJECT_DIR, check, custom, firmware, keymap, keypos, workspace
+from .. import (PROJECT_DIR, check, custom, firmware, keyboards, keymap, keypos,
+               workspace)
 
 EMIT = {"viledance": custom.emit_viledance, "combo": custom.emit_combo,
         "modifier": custom.emit_modifier, "layer": custom.emit_layer,
@@ -140,6 +147,10 @@ class Handler(BaseHTTPRequestHandler):
         self.path, _, query = self.path.split("#", 1)[0].partition("?")
         if self.path == "/api/build":
             return self._build_status(parse_qs(query))
+        if self.path == "/api/keyboards":
+            kbs, boards = keyboards.offer(Args().zmk)
+            return self._send(200, {"keyboards": kbs, "controllers": boards,
+                                    "default_controller": keyboards.DEFAULT_CONTROLLER})
         if self.path == "/api/state":
             data = keymap.collect_data(Args())
             data["custom"] = custom.load_everything()
@@ -283,6 +294,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/zmk":
             return self._zmk(rec)
 
+        if self.path == "/api/keyboard":
+            return self._keyboard_add(rec)
+
         if self.path == "/api/build":
             try:
                 firmware.JOB.start(str(rec.get("name") or ""))
@@ -297,9 +311,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         if not self._guard():
             return
+        self.path, _, query = self.path.partition("?")
         if self.path == "/api/build":
             return self._send(200, {"cancelled": firmware.JOB.cancel()})
         parts = self.path.strip("/").split("/")
+        if len(parts) == 3 and parts[:2] == ["api", "keyboard"]:
+            files = (parse_qs(query).get("files") or ["1"])[0] != "0"
+            try:
+                r = keyboards.remove(parts[2], files=files, zmk_dir=Args().zmk)
+            except keyboards.KeyboardError as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(200, r)
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "variant":
             try:
                 gone = custom.delete_variant(parts[2])
@@ -396,6 +418,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"was": r["was"], "files": r["files"],
                                 "zmk": workspace.zmk_info()})
+
+    # ------------------------------------------------------------- keyboard
+    def _keyboard_add(self, rec):
+        """Copy a keyboard's keymap into config/ and append its build.yaml entries."""
+        args = (str(rec.get("id") or ""), str(rec.get("source") or ""),
+                str(rec.get("controller") or ""))
+        try:
+            if rec.get("dry"):
+                p = keyboards.plan(*args, zmk_dir=Args().zmk)
+                p.pop("_copies", None)
+            else:
+                p = keyboards.add(*args, zmk_dir=Args().zmk)
+        except keyboards.KeyboardError as exc:
+            return self._send(400, {"error": str(exc)})
+        except OSError as exc:
+            return self._send(500, {"error": str(exc)})
+        return self._send(200, p)
 
     # ---------------------------------------------------------------- build
     def _build_status(self, q):

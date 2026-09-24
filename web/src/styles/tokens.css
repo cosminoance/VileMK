@@ -17,3 +17,5 @@
   }
 }
 *{box-sizing:border-box}
+/* Native controls (checkboxes, radios, selects, scrollbars) take the scheme and the accent. */
+:root{color-scheme:light dark;accent-color:var(--accent)}

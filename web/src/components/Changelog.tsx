@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import ver from "../../../version/version.json";
 import { QMark } from "./Help";
+import { Modal } from "./Modal";
 
 // The notes live in changelog/x.y.z.md at the repo root, one file per version,
 // hand-written in the pull request that ships them. They are bundled here
@@ -36,27 +37,25 @@ export function VersionChip() {
 
 function ChangelogSheet({ close }: { close: () => void }) {
   return (
-    <div className="modal" onClick={close}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="bar">
-          <h2>What changed</h2>
-          <span className="path">running v{ver.version}</span>
-        </div>
-        <div className="clog">
-          {ENTRIES.length
-            ? ENTRIES.map((e) => (
-                <section key={e.version}>
-                  <h3>{e.version}</h3>
-                  <ul>{e.lines.map((line, i) =>
-                    <li key={i}>{line.replace(/^[-*]\s+/, "")}</li>)}</ul>
-                </section>
-              ))
-            : <p className="muted">No entries yet.</p>}
-        </div>
-        <div className="rowbtns">
-          <button className="ghost" onClick={close}>Close</button>
-        </div>
+    <Modal onClose={close}>
+      <div className="bar">
+        <h2>What changed</h2>
+        <span className="path">running v{ver.version}</span>
       </div>
-    </div>
+      <div className="clog">
+        {ENTRIES.length
+          ? ENTRIES.map((e) => (
+              <section key={e.version}>
+                <h3>{e.version}</h3>
+                <ul>{e.lines.map((line, i) =>
+                  <li key={i}>{line.replace(/^[-*]\s+/, "")}</li>)}</ul>
+              </section>
+            ))
+          : <p className="muted">No entries yet.</p>}
+      </div>
+      <div className="rowbtns">
+        <button className="ghost" onClick={close}>Close</button>
+      </div>
+    </Modal>
   );
 }

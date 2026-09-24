@@ -5,6 +5,7 @@ import { deleteVariant, saveVariant } from "../state/actions";
 import { useStore } from "../state/store";
 import { BuildPanel, buildChoices } from "./Build";
 import { Dropdown } from "./Dropdown";
+import { Modal } from "./Modal";
 
 export function VariantBar({ km }: { km: any }) {
   const { s, d } = useStore();
@@ -65,26 +66,24 @@ function SaveAsSheet({ start, from, save, close }:
     if (ok) close();
   };
   return (
-    <div className="modal" onClick={busy ? undefined : close}>
-      <div className="sheet saveas" onClick={(e) => e.stopPropagation()}
+    <Modal onClose={busy ? undefined : close} className="saveas"
            onKeyDown={(e) => { if (e.key === "Escape" && !busy) close(); }}>
-        <div className="bar">
-          <h2>Save as a new variant</h2>
-          <span className="path">from {from}</span>
-        </div>
-        <div className="bar">
-          <span className="path">variants/</span>
-          <input className="kb wide" value={name} autoFocus autoComplete="off"
-                 placeholder="letters, digits, underscores"
-                 onChange={(e) => setName(e.target.value)}
-                 onKeyDown={(e) => { if (e.key === "Enter" && !busy) go(); }} />
-        </div>
-        {tried && s.msg?.bad && <div className="msg bad">{s.msg.text}</div>}
-        <div className="rowbtns">
-          <button className="act" disabled={busy || !name.trim()} onClick={go}>Save</button>
-          <button className="ghost" disabled={busy} onClick={close}>Cancel</button>
-        </div>
+      <div className="bar">
+        <h2>Save as a new variant</h2>
+        <span className="path">from {from}</span>
       </div>
-    </div>
+      <div className="bar">
+        <span className="path">variants/</span>
+        <input className="kb wide" value={name} autoFocus autoComplete="off"
+               placeholder="letters, digits, underscores"
+               onChange={(e) => setName(e.target.value)}
+               onKeyDown={(e) => { if (e.key === "Enter" && !busy) go(); }} />
+      </div>
+      {tried && s.msg?.bad && <div className="msg bad">{s.msg.text}</div>}
+      <div className="rowbtns">
+        <button className="act" disabled={busy || !name.trim()} onClick={go}>Save</button>
+        <button className="ghost" disabled={busy} onClick={close}>Cancel</button>
+      </div>
+    </Modal>
   );
 }

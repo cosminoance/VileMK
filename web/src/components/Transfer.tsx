@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { rowKey, summarise, unresolved, type ImportRow, type Needed } from "../lib/transfer";
 import { exportVariant, openImport, runImport } from "../state/actions";
 import { useStore } from "../state/store";
+import { Modal } from "./Modal";
 
 export function ExportBar({ km }: { km: any }) {
   const { d } = useStore();
@@ -93,68 +94,66 @@ export function ImportDialog() {
   const done = imp.result;
 
   return (
-    <div className="modal" onClick={close}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="bar">
-          <h2>Import {imp.filename}</h2>
-          <span className="path">{imp.board || "unknown keyboard"}</span>
-        </div>
-
-        {!imp.known
-          ? <>
-              <MissingBoard board={imp.board} mod={imp.module} />
-              <div className="rowbtns"><button className="ghost" onClick={close}>
-                Close
-              </button></div>
-            </>
-          : done
-          ? <>
-              <div className="msg ok">wrote {done.folder || done.wrote}</div>
-              {!!done.renamed.length &&
-                <ul className="ilist">{done.renamed.map((r) =>
-                  <li key={r} className="irow"><span className="nm">{r}</span></li>)}
-                </ul>}
-              {done.errors.map((e) => <div className="warn" key={e}>{e}</div>)}
-              {done.warnings.map((w) => <div className="legend" key={w}>{w}</div>)}
-              {!done.errors.length &&
-                <p className="legend">The checks found no errors.</p>}
-              <div className="rowbtns">
-                <button className="act" onClick={close}>Done</button>
-              </div>
-            </>
-          : <>
-              <label className="bar">
-                <span className="path">save as variant</span>
-                <input className="kb wide" autoComplete="off" value={imp.name}
-                       onChange={(e) => d({ t: "impPatch",
-                                            patch: { name: e.target.value } })} />
-                {imp.taken && <span className="path">overwrites the existing one</span>}
-              </label>
-
-              {imp.records.length
-                ? <ul className="ilist">
-                    {imp.records.map((r) => <Row key={rowKey(r)} row={r} />)}
-                  </ul>
-                : <p className="legend">
-                    This keymap carries no VileMK records, so there is nothing to
-                    restore alongside it.
-                  </p>}
-
-              {imp.error && <div className="msg bad">{imp.error}</div>}
-              <div className="rowbtns">
-                <button className="act" disabled={imp.busy || !!left.length}
-                        onClick={() => runImport(s, d)}>
-                  {imp.busy ? "Importing…" : "Import"}
-                </button>
-                <button className="ghost" onClick={close}>Cancel</button>
-                {!!left.length &&
-                  <span className="path">
-                    decide what to do with {left.length} record(s) first
-                  </span>}
-              </div>
-            </>}
+    <Modal onClose={close}>
+      <div className="bar">
+        <h2>Import {imp.filename}</h2>
+        <span className="path">{imp.board || "unknown keyboard"}</span>
       </div>
-    </div>
+
+      {!imp.known
+        ? <>
+            <MissingBoard board={imp.board} mod={imp.module} />
+            <div className="rowbtns"><button className="ghost" onClick={close}>
+              Close
+            </button></div>
+          </>
+        : done
+        ? <>
+            <div className="msg ok">wrote {done.folder || done.wrote}</div>
+            {!!done.renamed.length &&
+              <ul className="ilist">{done.renamed.map((r) =>
+                <li key={r} className="irow"><span className="nm">{r}</span></li>)}
+              </ul>}
+            {done.errors.map((e) => <div className="warn" key={e}>{e}</div>)}
+            {done.warnings.map((w) => <div className="legend" key={w}>{w}</div>)}
+            {!done.errors.length &&
+              <p className="legend">The checks found no errors.</p>}
+            <div className="rowbtns">
+              <button className="act" onClick={close}>Done</button>
+            </div>
+          </>
+        : <>
+            <label className="bar">
+              <span className="path">save as variant</span>
+              <input className="kb wide" autoComplete="off" value={imp.name}
+                     onChange={(e) => d({ t: "impPatch",
+                                          patch: { name: e.target.value } })} />
+              {imp.taken && <span className="path">overwrites the existing one</span>}
+            </label>
+
+            {imp.records.length
+              ? <ul className="ilist">
+                  {imp.records.map((r) => <Row key={rowKey(r)} row={r} />)}
+                </ul>
+              : <p className="legend">
+                  This keymap carries no VileMK records, so there is nothing to
+                  restore alongside it.
+                </p>}
+
+            {imp.error && <div className="msg bad">{imp.error}</div>}
+            <div className="rowbtns">
+              <button className="act" disabled={imp.busy || !!left.length}
+                      onClick={() => runImport(s, d)}>
+                {imp.busy ? "Importing…" : "Import"}
+              </button>
+              <button className="ghost" onClick={close}>Cancel</button>
+              {!!left.length &&
+                <span className="path">
+                  decide what to do with {left.length} record(s) first
+                </span>}
+            </div>
+          </>}
+    </Modal>
   );
 }
 

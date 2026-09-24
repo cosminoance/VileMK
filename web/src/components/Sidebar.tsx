@@ -3,6 +3,7 @@ import { useState } from "react";
 import { openImport } from "../state/actions";
 import { LIVE, useStore } from "../state/store";
 import { ExportButton } from "./Export";
+import { KeyboardsButton } from "./Keyboards";
 import { ImportButton } from "./Transfer";
 
 const KINDS: Record<string, string> = {
@@ -38,7 +39,7 @@ export function Sidebar() {
     <aside id="kblist" className={over ? "dropping" : ""} {...drop}>
       <input placeholder="filter keyboards…" autoComplete="off" value={s.filter}
              onChange={(e) => d({ t: "filter", v: e.target.value })} />
-      {LIVE(s) && <ImportButton />}
+      {LIVE(s) && <><KeyboardsButton /><ImportButton /></>}
       <div>
         {groups.length
           ? groups.map((g) => (
