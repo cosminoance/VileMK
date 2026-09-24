@@ -1,17 +1,79 @@
 import { useRef, useState } from "react";
 
+import { saveFile } from "../lib/download";
 import { rowKey, summarise, unresolved, type ImportRow, type Needed } from "../lib/transfer";
-import { exportVariant, openImport, runImport } from "../state/actions";
+import { exportText, openImport, runImport } from "../state/actions";
 import { useStore } from "../state/store";
 import { Modal } from "./Modal";
+import { Toggle } from "./Toggle";
 
-export function ExportBar({ km }: { km: any }) {
-  const { d } = useStore();
-  if (km.kind !== "variant") return null;
-  // A config or vendor keymap is a file the user already has.
-  return <button className="ghost" onClick={() => exportVariant(d, km)}>
-    Export keymap
-  </button>;
+/** "Export keymap" from a sidebar row's menu: the `.keymap` to hand someone,
+ *  saved through the file picker or copied as text. */
+export function KeymapExportDialog({ km, close }: { km: any; close: () => void }) {
+  const { s, d } = useStore();
+  const [nums, setNums] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const layout = Math.min(s.layout, km.layouts.length - 1);
+  const pending = km.id === s.id && (
+    Object.values(s.assign).some((o: any) => Object.keys(o).length)
+    || !!(s.newLayers[km.id] || []).length);
+
+  const run = (fn: (r: { filename: string; text: string }) =>
+                 Promise<string | null>) => async () => {
+    setBusy(true);
+    try {
+      const said = await fn(await exportText(km, nums, layout));
+      if (said) { d({ t: "msg", msg: { text: said } }); close(); }
+    } catch (e) {
+      d({ t: "msg", msg: { text: (e as Error).message, bad: true } });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={close}>
+      <div className="bar">
+        <h2>Export {km.name}</h2>
+        <span className="path">{km.path}</span>
+      </div>
+
+      {km.kind === "variant" &&
+        <p className="legend">
+          The file carries the VileMK records it uses, so importing it restores
+          them.
+        </p>}
+      {pending &&
+        <div className="warn">unsaved edits are not in the file; Save first to
+          include them</div>}
+
+      <div className="bar">
+        <Toggle checked={nums} onChange={setNums}>
+          include key positions
+        </Toggle>
+        <span className="path">
+          a comment drawing the {km.layouts[layout].display
+            || km.layouts[layout].label} layout with each key's number
+        </span>
+      </div>
+
+      <div className="rowbtns">
+        <button className="act" disabled={busy}
+                onClick={run(async (r) =>
+                  await saveFile(r.filename,
+                    new Blob([r.text], { type: "text/plain;charset=utf-8" }),
+                    [{ description: "ZMK keymap",
+                       accept: { "text/plain": [".keymap"] } }])
+                    ? `saved ${r.filename}` : null)}>Save as…</button>
+        <button className="ghost" disabled={busy}
+                onClick={run(async (r) => {
+                  await navigator.clipboard.writeText(r.text);
+                  return `copied ${r.filename}`;
+                })}>Copy to clipboard</button>
+        <button className="ghost" onClick={close}>Cancel</button>
+      </div>
+    </Modal>
+  );
 }
 
 export function ImportButton() {

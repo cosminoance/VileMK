@@ -101,3 +101,8 @@ button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
 .msg{border-radius:6px;padding:6px 10px;margin:10px 0;font-size:12px}
 .msg.ok{background:var(--combo-soft);color:var(--combo)}
 .msg.bad{background:var(--warn-soft);color:var(--warn)}
+.msg.notice{display:flex;align-items:center;gap:8px}
+.msg.notice>span{flex:1}
+.msg.notice .x{background:none;border:0;padding:0 4px;color:inherit;cursor:pointer;
+  font:inherit;font-size:14px;line-height:1;opacity:.7}
+.msg.notice .x:hover{opacity:1}

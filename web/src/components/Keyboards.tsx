@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { useStore } from "../state/store";
 import { ask } from "./Confirm";
 import { Help } from "./Help";
+import { askLeftover } from "./Leftover";
 import { Modal } from "./Modal";
 
 interface Kb {
@@ -15,11 +16,11 @@ interface Ctl { id: string; name: string; source: string }
 interface Mod { name: string; url: string; ref: string; revision: string; fetched: boolean }
 interface Offer {
   keyboards: Kb[]; controllers: Ctl[]; default_controller: string; modules: Mod[];
+  module_names: Record<string, string>;
 }
 interface Plan { build: string; entries: string[]; copy: string[]; kept: string[] }
 
 const key = (k: Kb) => `${k.source}:${k.id}`;
-const from = (source: string) => source === "zmk" ? "ZMK" : source;
 const short = (sha: string) => sha.slice(0, 7);
 
 /** Sidebar button that opens the keyboard sheet. */
@@ -44,12 +45,16 @@ function KeyboardsSheet({ close }: { close: () => void }) {
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("main");
+  const [renaming, setRenaming] = useState<{ mod: string; alias: string } | null>(null);
 
   const load = async () => setOffer(await api<Offer>("GET", "/api/keyboards"));
   useEffect(() => {
     load().catch((e) => setMsg({ text: e.message, bad: true }));
   }, []);
 
+  // A module's alias, from custom/module-names.json; only this page uses it.
+  const label = (source: string) => source === "zmk" ? "ZMK"
+    : offer?.module_names[source] || source;
   const kbs = offer?.keyboards ?? [];
   const added = kbs.filter((k) => k.added);
   const ql = q.trim().toLowerCase();
@@ -135,12 +140,44 @@ function KeyboardsSheet({ close }: { close: () => void }) {
           + " default .keymap)");
   });
 
+  // The server swaps the new copy in only when no variant breaks; otherwise it
+  // names the problems and the commit, which Overwrite installs unchecked.
   const updateModule = (m: Mod) => act(async () => {
-    const r = await api("POST", `/api/module/${encodeURIComponent(m.name)}`);
-    return r.was === r.revision
-      ? `${m.name} is already at ${short(r.revision)}, fetched again`
-      : `${m.name}: ${r.ref} is now ${short(r.revision)}, ${r.files} files`;
+    const path = `/api/module/${encodeURIComponent(m.name)}`;
+    const r = await api("POST", path);
+    if (r.updated) {
+      const text = r.was === r.revision
+        ? `${m.name} is already at ${short(r.revision)}, fetched again`
+        : `${m.name}: ${r.ref} is now ${short(r.revision)}, ${r.files} files`;
+      await ask({ info: true, title: "Fetch check success",
+                  body: `Updated the local module. ${text}.` });
+      return text;
+    }
+    const answer = await ask({
+      info: true, title: "Fetch check failure",
+      body: <>Did not update the local module. {label(m.name)} at {short(r.sha)} would
+        break:<ul>{r.problems.map((p: string) => <li key={p}>{p}</li>)}</ul></>,
+      extra: { label: "Overwrite",
+               tip: <>Installs {short(r.sha)} anyway. The variants listed will not
+                 build until they are fixed to match it.</> } });
+    if (answer !== "extra")
+      return `${m.name} not updated, still at ${short(m.revision)}`;
+    const o = await api("POST", path, { overwrite: true, sha: r.sha });
+    return `${m.name}: overwritten with ${short(o.revision)}, ${o.files} files`;
   });
+
+  const rename = async () => {
+    if (!renaming) return;
+    try {
+      const r = await api("POST", "/api/module-name",
+                          { module: renaming.mod, alias: renaming.alias });
+      setOffer((o) => o && { ...o, module_names: r.module_names });
+      d({ t: "data", data: await api("GET", "/api/state") });
+      setRenaming(null);
+    } catch (e: any) {
+      setMsg({ text: e.message, bad: true });
+    }
+  };
 
   const removeModule = async (m: Mod) => {
     if (!await ask({ title: `Remove module ${m.name}?`, ok: "Remove", danger: true,
@@ -149,8 +186,10 @@ function KeyboardsSheet({ close }: { close: () => void }) {
           + " keyboards." }))
       return;
     act(async () => {
-      await api("DELETE", `/api/module/${encodeURIComponent(m.name)}`);
-      return `removed module ${m.name}`;
+      const r = await api("DELETE", `/api/module/${encodeURIComponent(m.name)}`);
+      if (r.left.length) await askLeftover(label(m.name), r.left);
+      return `removed module ${m.name}` + (r.left.length
+        ? `; ${r.left.length} file(s) could not be deleted` : "");
     });
   };
 
@@ -169,7 +208,7 @@ function KeyboardsSheet({ close }: { close: () => void }) {
           {added.map((k) => (
             <li key={key(k)} className="irow">
               <span className="nm">{k.name}</span>
-              <span className="path">{k.id} · {from(k.source)}</span>
+              <span className="path">{k.id} · {label(k.source)}</span>
               <button className="ghost sm danger push" disabled={busy}
                       onClick={() => remove(k)}>Remove</button>
             </li>))}
@@ -181,14 +220,38 @@ function KeyboardsSheet({ close }: { close: () => void }) {
         <ul className="ilist">
           {offer.modules.map((m) => (
             <li key={m.name} className="irow">
-              <span className="nm">{m.name}</span>
+              {renaming?.mod === m.name
+                ? <input className="kb" autoFocus autoComplete="off" spellCheck={false}
+                         aria-label={`name for ${m.name}`} placeholder={m.name}
+                         value={renaming.alias}
+                         onChange={(e) => setRenaming({ ...renaming, alias: e.target.value })}
+                         onKeyDown={(e) => {
+                           if (e.key === "Enter") rename();
+                           if (e.key === "Escape") { e.stopPropagation(); setRenaming(null); }
+                         }} />
+                : <span className="nm">{label(m.name)}</span>}
               <span className="path">
+                {label(m.name) !== m.name && `${m.name} · `}
                 {m.ref || "no ref"} · {m.fetched ? short(m.revision) : "not fetched"}
               </span>
-              <button className="ghost sm push" disabled={busy || !m.ref}
+              {renaming?.mod === m.name
+                ? <button className="ghost sm push" onClick={rename}>Save name</button>
+                : <button className="ghost sm push" disabled={busy}
+                          onClick={() => setRenaming({ mod: m.name, alias: label(m.name) })}>
+                    Rename
+                  </button>}
+              <button className="ghost sm" disabled={busy || !m.ref}
                       onClick={() => updateModule(m)}>
                 {m.fetched ? "Update" : "Fetch"}
               </button>
+              <Help label="what rename and update do">
+                Rename changes only the name shown here, kept in
+                <code> custom/module-names.json</code>; a blank name goes back to
+                the repository's. 
+                Update will download the new repo shape and check it against the variants
+                that build its keyboards. It replaces the local module only when
+                none of them breaks.
+              </Help>
               <button className="ghost sm danger" disabled={busy}
                       onClick={() => removeModule(m)}>Remove</button>
             </li>))}
@@ -229,7 +292,7 @@ function KeyboardsSheet({ close }: { close: () => void }) {
           {groups.length
             ? groups.map((g) => <div key={g.src}>
                 <div className="group">
-                  {g.src === "zmk" ? "Built into ZMK" : `From module ${g.src}`}
+                  {g.src === "zmk" ? "Built into ZMK" : `From module ${label(g.src)}`}
                 </div>
                 {g.rows.map((k) => (
                   <button key={key(k)} className={key(k) === sel ? "sel" : ""}

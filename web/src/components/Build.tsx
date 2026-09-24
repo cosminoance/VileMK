@@ -8,6 +8,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { bindsStudioUnlock } from "../lib/keymaps";
 import { useStore, type State } from "../state/store";
+import { ask } from "./Confirm";
 import { Fold } from "./Fold";
 import { Help } from "./Help";
 import { Toggle } from "./Toggle";
@@ -23,6 +24,8 @@ type Job = {
   files: string[];
   targets?: string[];
   problem?: string;
+  /** Boards or shields the build names that `.zmk/` does not have. */
+  missing?: string[];
   folder?: string;
   path?: string;
   docker?: { ok: boolean; reason: string };
@@ -57,7 +60,7 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
     : dirty ? "save first" : null;
   const choices = [reset ? "with reset" : "", ...has].filter(Boolean).join(" \u00b7 ");
   return (
-    <Fold title="Build" open={s.build} onToggle={(on) => d({ t: "build", on })}
+    <Fold title="Build" accent open={s.build} onToggle={(on) => d({ t: "build", on })}
           summary={<>{choices}{short &&
             <span className="foldwarn">{choices ? " \u00b7 " : ""}{short}</span>}</>}>
       <div className="bar">
@@ -114,6 +117,14 @@ function BuildButton({ km, dirty, off, ...choices }:
   </>;
 }
 
+/** The guard for a build whose keyboard is not in the project. */
+const notInstalled = (missing: string[]) => ask({
+  info: true, title: missing.length > 1 ? "Boards not installed" : "Board not installed",
+  body: <>This variant builds <code>{missing.join(", ")}</code>, which{" "}
+    {missing.length > 1 ? "are" : "is"} not in ZMK or any installed module. Add the
+    keyboard, or the module it comes from, with <b>Add a keyboard</b> in the sidebar,
+    then build again.</> });
+
 function BuildSheet({ name, dirty, choices, close }:
     { name: string; dirty: number; choices: Choices; close: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
@@ -139,7 +150,11 @@ function BuildSheet({ name, dirty, choices, close }:
     return r;
   };
 
-  useEffect(() => { pull(true).catch((e) => setErr(e.message)); }, []);
+  useEffect(() => {
+    pull(true).then(async (r) => {
+      if (r.missing?.length) { await notInstalled(r.missing); close(); }
+    }).catch((e) => setErr(e.message));
+  }, []);
 
   const running = job?.state === "running";
   useEffect(() => {
@@ -167,7 +182,10 @@ function BuildSheet({ name, dirty, choices, close }:
       setLines(r.lines);
       next.current = r.next;
       setJob((prev) => ({ ...prev, ...r }));
-    } catch (e: any) { setErr(e.message); }
+    } catch (e: any) {
+      if (e.body?.missing?.length) await notInstalled(e.body.missing);
+      else setErr(e.message);
+    }
   };
 
   const openFolder = async () => {

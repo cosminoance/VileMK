@@ -5,12 +5,12 @@ import { layersOf } from "../lib/layers";
 import { tabForBinding } from "../lib/cards";
 import { LIVE, draftOf, useStore } from "../state/store";
 import { Board } from "./Board";
+import { askText } from "./Confirm";
 import { KeyEditor } from "./KeyEditor";
 import { Menu } from "./Menu";
 import { Panel } from "./Panels";
 import { Tables } from "./Tables";
 import { Toggle } from "./Toggle";
-import { ExportBar } from "./Transfer";
 import { VariantBar } from "./VariantBar";
 
 export function KeymapView() {
@@ -38,9 +38,10 @@ export function KeymapView() {
     baseLayer && baseLayer.bindings.length === (layer ? layer.bindings.length : 0)
       ? baseLayer.bindings : null;
 
-  const addLayer = () => {
+  const addLayer = async () => {
     const n = allLayers.length;
-    const name = (prompt("Layer name", `layer_${n}`) || "").trim();
+    const name = await askText({ title: "New layer", ok: "Add layer",
+      field: { value: `layer_${n}`, placeholder: "layer name" } });
     if (!name) return;
     d({ t: "addLayer", kmId: km.id, name, at: n });
   };
@@ -81,16 +82,12 @@ export function KeymapView() {
           : <span className="path">
               {lay.display || lay.label} &middot; {lay.count} keys
             </span>}
-        <select value={s.base} onChange={(e) => d({ t: "base", id: e.target.value })}>
+        <select className="grow" value={s.base} onChange={(e) => d({ t: "base", id: e.target.value })}>
           <option value="">compare with… (off)</option>
           {s.data.keymaps.filter((k: any) => k.id !== km.id).map((k: any) => (
             <option key={k.id} value={k.id}>{k.kind}: {k.path}</option>
           ))}
         </select>
-        <Toggle checked={s.nums} onChange={(on) => d({ t: "nums", on })}>
-          key positions
-        </Toggle>
-        <ExportBar km={km} />
       </div>
 
       {live && <VariantBar key={km.id} km={km} />}
@@ -127,6 +124,11 @@ export function KeymapView() {
                 drawn on a plain grid, but the numbers are still the real key
                 positions.
               </div>}
+            <div className="boardopts">
+              <Toggle checked={s.nums} onChange={(on) => d({ t: "nums", on })}>
+                key positions
+              </Toggle>
+            </div>
             <Board km={km} lay={lay} bindings={layer.bindings}
                    baseBindings={baseBindings} assign={s.assign[li] || {}}
                    nums={s.nums} hot={s.hot} sel={sel} editing={s.editing}

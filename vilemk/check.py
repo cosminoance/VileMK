@@ -313,10 +313,11 @@ def split_bindings(group: str, binding_macros=()):  # -> [(label, params, offset
     return out
 
 
-def detect_key_count(keymap_path, zmk_dir=None):
+def detect_key_count(keymap_path, zmk_dir=None, roots=None):
     """Key positions for the keyboard this keymap targets, from its physical
-    layout (or matrix transform). Returns (count, note, alternatives)."""
-    roots = keypos.search_roots(zmk_dir=zmk_dir)
+    layout (or matrix transform). Returns (count, note, alternatives).
+    `roots` replaces the usual search, e.g. to look at a module not yet installed."""
+    roots = roots or keypos.search_roots(zmk_dir=zmk_dir)
     if not roots:
         return None, None, []
     layouts, transforms, chosen = keypos.collect(roots)
@@ -379,7 +380,8 @@ class KeymapFile:
             self.defines = {**self.hdr_defines, **self.defines}
             self.funclike = {**hdr_funclike, **self.funclike}
 
-        detected, self.detect_note, self.alt_layouts = detect_key_count(path, args.zmk)
+        detected, self.detect_note, self.alt_layouts = detect_key_count(
+            path, args.zmk, getattr(args, "roots", None))
         self.expected_keys = args.keys or detected or 64
         if args.keys is None and detected is None:
             self.rep.warn(0, "could not find a physical layout for this keyboard; "

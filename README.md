@@ -412,6 +412,11 @@ keyboard has one file per half, and each half is flashed with its own. A
 board that produces a `.bin` instead has no drive to copy to; flash it with
 the board's own tool.
 
+A successful build of an Eyelash Sofle variant with the settings reset
+files included:
+
+![The build dialog after a successful build, listing the four .uf2 files written to the variant's firmware folder](images/successful-build.png)
+
 **It needs Docker.** The build runs in `zmkfirmware/zmk-build-arm:stable`,
 the image ZMK's own GitHub workflow uses, against the ZMK commit pinned in
 `config/west.yml`. Your user has to be able to run `docker` without sudo

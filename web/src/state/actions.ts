@@ -5,8 +5,9 @@
 import { createElement, type Dispatch } from "react";
 
 import { ask } from "../components/Confirm";
+import { askLeftover } from "../components/Leftover";
 import { api } from "../lib/api";
-import { readTextFile, saveFile } from "../lib/download";
+import { readTextFile } from "../lib/download";
 import { BOARD_TABS, KIND_OF, PANEL_TITLES, recordOf, type Mode } from "../lib/drafts";
 import { scopeOf, scopeOn, slugify, byId } from "../lib/keymaps";
 import type { Action, State } from "./store";
@@ -151,8 +152,9 @@ export async function deleteVariant(s: State, d: D, km: any) {
 export async function deleteVendor(s: State, d: D, km: any) {
   const b = km.board;
   if (!b) return;
+  const modName = s.data.module_names?.[b.source] || b.source;
   const mod = b.source === "zmk" ? ""
-    : `, and the ${b.source} module is removed once no other keyboard uses it`;
+    : `, and the ${modName} module is removed once no other keyboard uses it`;
   if (!await ask({ title: `Delete ${km.name}?`, ok: "Delete", danger: true,
                    body: `Its entries leave build.yaml${mod}. `
                      + "You can add it again with Add a keyboard." })) return;
@@ -161,7 +163,8 @@ export async function deleteVendor(s: State, d: D, km: any) {
                                   + `?source=${encodeURIComponent(b.source)}`);
     const fresh = await api("GET", "/api/state");
     d({ t: "deletedKeymap", data: fresh, store: fresh.custom || s.store, kmId: km.id,
-        msg: { text: `deleted ${km.name}` + (r.module ? ` and module ${r.module}` : "") } });
+        msg: { text: `deleted ${km.name}` + (r.module ? ` and module ${modName}` : "") } });
+    if (r.left?.length) await askLeftover(modName, r.left);
   } catch (e) {
     const used: string[] = (e as any).body?.variants || [];
     if (!used.length) return d({ t: "msg", msg: bad(e) });
@@ -175,15 +178,11 @@ export async function deleteVendor(s: State, d: D, km: any) {
 
 // ------------------------------------------------------------ share and import
 
-export async function exportVariant(d: D, km: any) {
-  try {
-    const r = await api("GET", `/api/export/${encodeURIComponent(km.name)}`);
-    const ok = await saveFile(r.filename,
-      new Blob([r.text], { type: "text/plain;charset=utf-8" }),
-      [{ description: "ZMK keymap", accept: { "text/plain": [".keymap"] } }]);
-    if (ok) d({ t: "msg", msg: { text: `exported ${r.filename}` } });
-  } catch (e) { d({ t: "msg", msg: bad(e) }); }
-}
+/** The text to share for any listed keymap; a variant carries its records. */
+export const exportText = (km: any, positions: boolean, layout: number) =>
+  api<{ filename: string; text: string }>("GET",
+    `/api/export?id=${encodeURIComponent(km.id)}`
+    + (positions ? `&positions=1&layout=${layout}` : ""));
 
 export async function openImport(d: D, file: File) {
   try {

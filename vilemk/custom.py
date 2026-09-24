@@ -53,6 +53,10 @@ DIRS = {"viledance": os.path.join(CUSTOM_DIR, "viledance"),
         "layer": os.path.join(CUSTOM_DIR, "layer"),
         "macro": os.path.join(CUSTOM_DIR, "macro")}
 
+# Display names for modules, {module: alias}. Only the page reads it; west.yml,
+# `.zmk/modules/` and every API keep the real name.
+MODULE_NAMES = os.path.join(CUSTOM_DIR, "module-names.json")
+
 VILE_SLOTS = ("tap", "hold", "double_tap", "tap_hold")
 FLAVORS = ("hold-preferred", "balanced", "tap-preferred", "tap-unless-interrupted")
 # https://zmk.dev/docs/keymaps/modifiers - left/right shift, control, alt, gui.
@@ -113,6 +117,35 @@ def load_all(kind: str) -> list:
         rec["kind"] = kind
         out.append(rec)
     return out
+
+
+def module_names() -> dict:
+    try:
+        with open(MODULE_NAMES, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, str)} \
+        if isinstance(data, dict) else {}
+
+
+def set_module_name(module: str, alias: str) -> dict:
+    """Name `module` `alias` on the page; a blank alias goes back to the real name."""
+    alias = " ".join(alias.split())
+    if not module:
+        raise ValueError("no module named")
+    if len(alias) > 60:
+        raise ValueError("a module name is at most 60 characters")
+    names = module_names()
+    if alias and alias != module:
+        names[module] = alias
+    else:
+        names.pop(module, None)
+    os.makedirs(CUSTOM_DIR, exist_ok=True)
+    with open(MODULE_NAMES, "w", encoding="utf-8") as fh:
+        json.dump(names, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return names
 
 
 def load_everything() -> dict:
@@ -728,7 +761,7 @@ def _layer_spans(text: str):
         body_open = text.index("{", nm.start())
         body_close = _match_brace(text, body_open)
         body = text[body_open:body_close]
-        bm = re.search(r"bindings\s*=\s*<", body)
+        bm = re.search(r"(?<![\w-])bindings\s*=\s*<", body)
         if bm:
             b_open = body_open + bm.end()
             b_close = body.index(">", bm.end()) + body_open

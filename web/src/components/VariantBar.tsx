@@ -6,6 +6,7 @@ import { useStore } from "../state/store";
 import { BuildPanel, buildChoices } from "./Build";
 import { Dropdown } from "./Dropdown";
 import { Modal } from "./Modal";
+import { Notice } from "./Notice";
 
 export function VariantBar({ km }: { km: any }) {
   const { s, d } = useStore();
@@ -43,8 +44,7 @@ export function VariantBar({ km }: { km: any }) {
                 onClick={() => deleteVariant(s, d, km)}>Delete variant</button>}
     </div>
     <BuildPanel km={km} dirty={n + nl} />
-    {s.msg &&
-      <div className={"msg " + (s.msg.bad ? "bad" : "ok")}>{s.msg.text}</div>}
+    {s.msg && <Notice msg={s.msg} close={() => d({ t: "msg", msg: null })} />}
     {asking &&
       <SaveAsSheet start={slugify(km.name) + (own ? "_2" : "_custom")} from={km.name}
                    save={(name) => save(null, name)} close={() => setAsking(false)} />}

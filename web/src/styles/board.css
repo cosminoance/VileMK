@@ -9,6 +9,10 @@
    rather than being clipped by `main`. The intrinsic width/height attributes
    stay the natural size, which is what the PNG export reads. */
 .board{display:block;margin:0 auto 18px;max-width:100%;height:auto}
+/* View options for the board, drawn as its caption rather than as a bar control. */
+.boardopts{display:flex;margin:-6px 0 8px;font-size:12px;color:var(--muted)}
+.boardopts .toggle{border:0;background:none;padding:0;color:inherit}
+.boardopts .toggle:has(input:checked){color:var(--ink)}
 .k rect{fill:var(--key);stroke:var(--key-line);stroke-width:1}
 .k text{fill:var(--ink);font-family:var(--font)}
 /* The shifted legend, printed where a real keycap prints it: above the plain
@@ -46,6 +50,13 @@ section.card .foldhead h3{margin:0}
 .foldbody .hint{margin-top:6px}
 .foldbody .warn{margin:8px 0 0}
 .foldhead .foldwarn{color:var(--warn)}
+section.card.fold.accent{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.fold.accent .foldhead,section.card.fold.accent .foldhead h3{color:var(--accent)}
+/* A block cursor after the title, blinking twice a second. */
+.foldhead .cursor{display:inline-block;width:.6em;height:1em;align-self:center;
+  background:var(--accent);animation:blink .5s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.foldhead .cursor{animation:none}}
 /* The build button ends the options row, pushed right so it is not read as one of them. */
 .buildgo{display:inline-flex;gap:10px;align-items:center;margin-left:auto}
 table{border-collapse:collapse;width:100%;font-size:12px}

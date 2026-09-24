@@ -65,6 +65,16 @@ class Busy(WorkspaceError):
     pass
 
 
+class CheckFailed(WorkspaceError):
+    """A fetch whose check found problems: nothing was swapped in or pinned.
+    `sha` is the commit that was checked, for an overwrite to fetch as is."""
+
+    def __init__(self, problems: list, sha: str = ""):
+        super().__init__("; ".join(problems))
+        self.problems = problems
+        self.sha = sha
+
+
 # ---------------------------------------------------------------- GitHub
 
 def parse_github(url: str):
@@ -137,12 +147,14 @@ def _safe_rel(name: str):
     return "/".join(parts)
 
 
-def fetch(owner: str, repo: str, sha: str, dest: str, prefixes=None) -> int:
+def fetch(owner: str, repo: str, sha: str, dest: str, prefixes=None, check=None) -> int:
     """Download `owner/repo` at `sha` and put it at `dest`, keeping only `prefixes`.
 
     Extracts into a temp dir beside `dest` and swaps it in with a rename, so the
     old copy stays until the new one is complete and a failed fetch leaves a
-    working tree. Returns the number of files written.
+    working tree. `check(tmp)` runs on the complete download before the swap; a
+    non-empty list of problems raises `CheckFailed` and leaves `dest` as it was.
+    Returns the number of files written.
     """
     parent = os.path.dirname(os.path.abspath(dest))
     os.makedirs(parent, exist_ok=True)
@@ -178,6 +190,9 @@ def fetch(owner: str, repo: str, sha: str, dest: str, prefixes=None) -> int:
         if not count:
             raise WorkspaceError(f"{owner}/{repo}@{sha[:7]} has none of "
                                  f"{', '.join(prefixes or ['its files'])}")
+        problems = check(tmp) if check else []
+        if problems:
+            raise CheckFailed(problems, sha)
         old = None
         if os.path.exists(dest):
             old = tempfile.mkdtemp(prefix=f".{os.path.basename(dest)}.old-", dir=parent)
@@ -348,25 +363,47 @@ def catalog(zmk_dir: str = ZMK_DIR):
     roots = [("zmk", os.path.join(zmk_dir, "zmk", "app", "boards"))]
     mods = os.path.join(zmk_dir, "modules")
     if os.path.isdir(mods):
-        roots += [(m, os.path.join(mods, m)) for m in sorted(os.listdir(mods))]
+        # A dot-name is a fetch in progress (`fetch()`'s temp dirs).
+        roots += [(m, os.path.join(mods, m)) for m in sorted(os.listdir(mods))
+                  if not m.startswith(".")]
+    return [e for source, root in roots for e in scan(source, root)]
+
+
+def installed_names(zmk_dir: str = ZMK_DIR) -> set:
+    """Every board and shield name a build can use here: catalog ids and halves,
+    plus every directory under a `boards/` tree (utility shields like
+    `settings_reset` have no `*.zmk.yml`)."""
+    names = {n for e in catalog(zmk_dir) for n in [e["id"], *e.get("siblings", [])]}
+    trees = [os.path.join(zmk_dir, "zmk", "app", "boards")]
+    mods = os.path.join(zmk_dir, "modules")
+    if os.path.isdir(mods):
+        trees += [os.path.join(mods, m, "boards") for m in os.listdir(mods)
+                  if not m.startswith(".")]
+    for tree in trees:
+        for _dirpath, dirs, _files in os.walk(tree):
+            names.update(d for d in dirs if not d.startswith("."))
+    return names
+
+
+def scan(source: str, root: str) -> list:
+    """The `*.zmk.yml` entries under one root, as `catalog()` lists them."""
     out = []
-    for source, root in roots:
-        for dirpath, dirs, files in os.walk(root):
-            dirs.sort()
-            for fn in sorted(files):
-                if not fn.endswith(".zmk.yml"):
-                    continue
-                path = os.path.join(dirpath, fn)
-                try:
-                    meta = parse_zmk_yml(open(path, encoding="utf-8").read())
-                except (OSError, UnicodeDecodeError):
-                    continue
-                if not meta.get("id"):
-                    continue
-                meta.update(source=source, dir=dirpath,
-                            keymap=os.path.isfile(os.path.join(dirpath,
-                                                               meta["id"] + ".keymap")))
-                out.append(meta)
+    for dirpath, dirs, files in os.walk(root):
+        dirs.sort()
+        for fn in sorted(files):
+            if not fn.endswith(".zmk.yml"):
+                continue
+            path = os.path.join(dirpath, fn)
+            try:
+                meta = parse_zmk_yml(open(path, encoding="utf-8").read())
+            except (OSError, UnicodeDecodeError):
+                continue
+            if not meta.get("id"):
+                continue
+            meta.update(source=source, dir=dirpath,
+                        keymap=os.path.isfile(os.path.join(dirpath,
+                                                           meta["id"] + ".keymap")))
+            out.append(meta)
     return out
 
 
@@ -493,12 +530,16 @@ def install_zmk(url: str = "", ref: str = "", zmk_dir: str = ZMK_DIR) -> dict:
         _LOCK.release()
 
 
-def install_module(name: str, zmk_dir: str = ZMK_DIR) -> dict:
+def install_module(name: str, zmk_dir: str = ZMK_DIR, check=None, sha: str = "") -> dict:
     """Fetch a module listed in west.yml into `.zmk/modules/<name>/` and pin it.
 
     The whole repository is kept: modules are small (zmk-eyelash-sofle is 768K)
-    and a keyboard's files are wherever the vendor put them.
+    and a keyboard's files are wherever the vendor put them. `check` is passed to
+    `fetch()`. `sha` fetches that commit instead of resolving the ref, so an
+    overwrite installs the commit that was checked, not a newer one.
     """
+    if sha and not SHA_RE.match(sha):
+        raise WorkspaceError(f"{sha!r} is not a commit")
     if not NAME_RE.match(name or "") or name == "zmk":
         raise WorkspaceError(f"{name!r} is not a module name")
     if not _LOCK.acquire(blocking=False):
@@ -512,8 +553,9 @@ def install_module(name: str, zmk_dir: str = ZMK_DIR) -> dict:
             raise WorkspaceError(f"{name} is pinned to a commit with no ref to follow; "
                                  f"set userdata.ref in {WEST_YML}")
         owner, repo = parse_github(cur["url"])
-        sha = resolve(owner, repo, cur["ref"])
-        files = fetch(owner, repo, sha, os.path.join(zmk_dir, "modules", name))
+        sha = sha or resolve(owner, repo, cur["ref"])
+        files = fetch(owner, repo, sha, os.path.join(zmk_dir, "modules", name),
+                      check=check)
         path = (project(data, name) or {}).get("path") or f"modules/{name}"
         _pin(data, name, cur["url"], cur["ref"], sha, path=path)
         west_yml_write(data)
@@ -560,7 +602,8 @@ def remove_module(name: str, zmk_dir: str = ZMK_DIR) -> dict:
     """Drop a module from west.yml and delete `.zmk/modules/<name>/`.
 
     Whether anything still uses it is the caller's question
-    (`keyboards.remove_module`); this only undoes `add_module`.
+    (`keyboards.remove_module`); this only undoes `add_module`. `left` lists
+    what could not be deleted, relative to the project.
     """
     if not NAME_RE.match(name or "") or name == "zmk":
         raise WorkspaceError(f"{name!r} is not a module name")
@@ -578,7 +621,12 @@ def remove_module(name: str, zmk_dir: str = ZMK_DIR) -> dict:
                 if not (isinstance(p, dict) and p.get("name") == name)]
             west_yml_write(data)
         shutil.rmtree(dest, ignore_errors=True)
-        return {"name": name, "listed": listed}
+        left = []
+        for dirpath, dirs, files in os.walk(dest):
+            left += [os.path.join(dirpath, f) for f in sorted(files)]
+            if not dirs and not files:
+                left.append(dirpath + os.sep)
+        return {"name": name, "listed": listed, "dir": dest, "left": left}
     finally:
         _LOCK.release()
 

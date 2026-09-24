@@ -23,9 +23,10 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import re
 import sys
 
-from . import PROJECT_DIR, custom, keymap, workspace
+from . import PROJECT_DIR, check, custom, keymap, keypos, workspace
 
 CONFIG_DIR = "config"
 BUILD_YAML = "build.yaml"
@@ -332,7 +333,7 @@ def remove_vendor(kid: str, source: str, zmk_dir: str = workspace.ZMK_DIR) -> di
     users = variants_using(_names(entry))
     if users:
         raise InUse(kid, users)
-    r = {"id": kid, "entries": 0, "deleted": [], "module": None}
+    r = {"id": kid, "entries": 0, "deleted": [], "module": None, "left": []}
     path = keymap.find_build_yaml()
     built = keymap.parse_build_yaml(keymap.read_text(path)) if path else []
     if _entries_of(_names(entry), built) or _config_files(kid):
@@ -343,9 +344,55 @@ def remove_vendor(kid: str, source: str, zmk_dir: str = workspace.ZMK_DIR) -> di
                  if e["source"] == source and e["type"] in ("board", "shield")
                  and _entries_of(_names(e), built)]
         if not still:
-            remove_module(source, zmk_dir)
+            r["left"] = remove_module(source, zmk_dir)["left"]
             r["module"] = source
     return r
+
+
+def _module_names(entries) -> set:
+    return {n for e in entries if e["type"] in ("board", "shield") for n in _names(e)}
+
+
+class _CheckArgs:
+    def __init__(self, zmk_dir, roots=None):
+        self.zmk, self.roots, self.keys = zmk_dir, roots, None
+
+
+def update_check(name: str, zmk_dir: str = workspace.ZMK_DIR):
+    """A `fetch()` check for updating module `name`: what the new copy would break
+    in the variants that build its keyboards. Only problems the current copy does
+    not already have are reported."""
+    def run(staged: str) -> list:
+        mods = os.path.join(zmk_dir, "modules")
+        was = _module_names(workspace.scan(name, os.path.join(mods, name)))
+        now = _module_names(workspace.scan(name, staged))
+        others = [os.path.join(mods, m) for m in sorted(os.listdir(mods))
+                  if m != name and not m.startswith(".")] if os.path.isdir(mods) else []
+        roots = [r for r in keypos.search_roots(zmk_dir=zmk_dir)
+                 if os.path.normpath(r) != os.path.normpath(mods)] + others + [staged]
+        out = []
+        for path in sorted(glob.glob(os.path.join(custom.VARIANT_DIR, "*", "build.yaml"))):
+            variant = os.path.basename(os.path.dirname(path))
+            used = {n for e in keymap.parse_build_yaml(keymap.read_text(path))
+                    for n in [e.board] + e.shields} & was
+            if not used:
+                continue
+            for n in sorted(used - now):
+                out.append(f"{variant}: {n} is not in the new version")
+            km_path = os.path.join(os.path.dirname(path), variant + ".keymap")
+            if not os.path.isfile(km_path):
+                continue
+            raw = keymap.read_text(km_path)
+            old, _, _ = check.check_text(km_path, raw, _CheckArgs(zmk_dir))
+            new, _, _ = check.check_text(km_path, raw, _CheckArgs(zmk_dir, roots))
+            if old.expected_keys != new.expected_keys:
+                out.append(f"{variant}: the layout has {new.expected_keys} keys, "
+                           f"was {old.expected_keys}")
+            seen = set(old.rep.errors)
+            out += [re.sub(r"^.*?:(\d+): ERROR ", rf"{variant} line \1: ", e)
+                    for e in new.rep.errors if e not in seen]
+        return out
+    return run
 
 
 def remove_module(name: str, zmk_dir: str = workspace.ZMK_DIR) -> dict:

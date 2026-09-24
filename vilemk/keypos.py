@@ -79,7 +79,9 @@ def iter_dts_files(roots):
     seen = set()
     for root in roots:
         for base, dirs, files in os.walk(root):
-            dirs[:] = [d for d in dirs if d not in (".git", "build", "__pycache__")]
+            # A dot-name under .zmk/modules is a fetch in progress.
+            dirs[:] = [d for d in dirs if d not in ("build", "__pycache__")
+                       and not d.startswith(".")]
             for fn in files:
                 if fn.endswith(DTS_SUFFIXES):
                     path = os.path.join(base, fn)

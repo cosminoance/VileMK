@@ -44,7 +44,7 @@ import sys
 import threading
 import time
 
-from . import PROJECT_DIR, custom, keymap, keypos
+from . import PROJECT_DIR, custom, keymap, keypos, workspace
 from .workspace import WEST_YML
 
 IMAGE = "zmkfirmware/zmk-build-arm:stable"
@@ -63,6 +63,16 @@ class BuildError(Exception):
 
 class Busy(BuildError):
     pass
+
+
+class NotInstalled(BuildError):
+    """The build names boards or shields that nothing in `.zmk/` provides."""
+
+    def __init__(self, missing: list):
+        super().__init__(f"{', '.join(missing)} {'is' if len(missing) == 1 else 'are'} "
+                         f"not installed; add the keyboard, or the module it comes "
+                         f"from, in Add a keyboard")
+        self.missing = missing
 
 
 # ------------------------------------------------------------------ docker
@@ -142,9 +152,10 @@ def build_yaml(name: str, zmk_dir: str, reset: bool, parts=None) -> str:
     return out
 
 
-def targets(name: str, yaml_text: str | None = None) -> list:
+def targets(name: str, yaml_text: str | None = None,
+            zmk_dir: str = workspace.ZMK_DIR) -> list:
     """Every entry of the variant's build.yaml (or `yaml_text`), as the build
-    will run it.
+    will run it. Raises `NotInstalled` for a board or shield `.zmk/` lacks.
 
     Any `KEYMAP_FILE` the entry carries is dropped (older variants name a
     `${GITHUB_WORKSPACE}` path) and the variant's own keymap is named instead,
@@ -183,6 +194,11 @@ def targets(name: str, yaml_text: str | None = None) -> list:
                     "display": f"{shield + ' - ' if shield else ''}{e.board}"})
     if not out:
         raise BuildError(f"variants/{name}/build.yaml has no entries")
+    have = workspace.installed_names(zmk_dir)
+    missing = sorted({n for t in out for n in [t["board"], *t["shield"].split()]
+                      if n not in have})
+    if missing:
+        raise NotInstalled(missing)
     return out
 
 

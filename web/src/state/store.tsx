@@ -128,11 +128,11 @@ export function reducer(s: State, a: Action): State {
     case "rail": return { ...s, rail: a.on };
 
     case "select":
-      return { ...s, id: a.id, layer: 0, layout: 0, hot: null };
+      return { ...s, id: a.id, layer: 0, layout: 0, hot: null, msg: null };
 
-    case "layer": return { ...s, layer: a.n };
-    case "layout": return { ...s, layout: a.n };
-    case "base": return { ...s, base: a.id };
+    case "layer": return { ...s, layer: a.n, msg: null };
+    case "layout": return { ...s, layout: a.n, msg: null };
+    case "base": return { ...s, base: a.id, msg: null };
     case "nums": return { ...s, nums: a.on };
     case "hot": return { ...s, hot: a.keys };
     case "msg": return { ...s, msg: a.msg };

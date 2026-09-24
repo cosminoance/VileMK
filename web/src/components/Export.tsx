@@ -58,7 +58,7 @@ export function ExportDialog({ km, close }: { km: any; close: () => void }) {
       if (svg) parts.push({ name: caption(layers[i], i), svg });
     }
     return sheetSvg(parts, {
-      title: title || km.name, subtitle: km.path,
+      title: title || km.name,
       captions: chosen.length > 1,
     });
   };
