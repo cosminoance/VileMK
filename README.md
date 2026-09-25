@@ -2,12 +2,6 @@
   <img src=".github/images/logo-banner.png" alt="VileMK" width="480">
 </p>
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=jn9MJbdGJI8">
-    <img src="https://i.ytimg.com/vi/jn9MJbdGJI8/maxresdefault.jpg" alt="VileMK - local zmk visual remapper" width="480"><br>
-    <img src="https://img.shields.io/badge/-Watch%20on%20YouTube-red?logo=youtube&logoColor=white&style=for-the-badge" alt="Watch on YouTube">
-  </a>
-</p>
 
 VileMK builds ZMK firmware for your keyboard on your own machine, from a keymap
 you edit in a local web app. The keymap can use the things ZMK Studio can't
