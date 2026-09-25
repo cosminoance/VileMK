@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import ver from "../../../version/version.json";
 import { QMark } from "./Help";
@@ -24,6 +24,25 @@ const ENTRIES: Entry[] = Object.entries(FILES)
   }))
   .sort((a, b) => rank(b.version) - rank(a.version));
 
+// Inline markdown only: `code`, **bold**, *italic*, [text](url).
+const INLINE = /`([^`]+)`|\*\*(.+?)\*\*|\*([^*\s][^*]*?)\*|\[([^\]]+)\]\(([^)\s]+)\)/g;
+
+function inline(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let at = 0;
+  for (const m of text.matchAll(INLINE)) {
+    if (m.index > at) out.push(text.slice(at, m.index));
+    const k = m.index;
+    if (m[1] !== undefined) out.push(<code key={k}>{m[1]}</code>);
+    else if (m[2] !== undefined) out.push(<strong key={k}>{inline(m[2])}</strong>);
+    else if (m[3] !== undefined) out.push(<em key={k}>{inline(m[3])}</em>);
+    else out.push(<a key={k} href={m[5]} target="_blank" rel="noreferrer">{inline(m[4])}</a>);
+    at = k + m[0].length;
+  }
+  if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
 export function VersionChip() {
   const [open, setOpen] = useState(false);
   return <>
@@ -48,7 +67,7 @@ function ChangelogSheet({ close }: { close: () => void }) {
               <section key={e.version}>
                 <h3>{e.version}</h3>
                 <ul>{e.lines.map((line, i) =>
-                  <li key={i}>{line.replace(/^[-*]\s+/, "")}</li>)}</ul>
+                  <li key={i}>{inline(line.replace(/^[-*]\s+/, ""))}</li>)}</ul>
               </section>
             ))
           : <p className="muted">No entries yet.</p>}

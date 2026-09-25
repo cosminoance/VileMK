@@ -89,3 +89,4 @@ header .chips{display:flex;gap:10px;align-items:center}
 .clog section:first-child h3{margin-top:0}
 .clog ul{margin:0;padding-left:18px}
 .clog li{margin:3px 0;font-size:13px}
+.clog code{color:var(--accent)}
