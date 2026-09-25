@@ -78,6 +78,14 @@ aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
   border-radius:4px;padding:1px 5px}
 .build code.gone{color:var(--muted);text-decoration:line-through}
 
+/* Flash: the steps, the search status, one Copy button per file. */
+.flash ol.steps{margin:8px 0;padding-left:20px;font-size:13px;line-height:1.5}
+.flash .msg{display:flex;align-items:center;gap:8px}
+.flash .msg:not(.ok):not(.bad){background:var(--line);color:var(--muted)}
+.flash ul.flashlist{list-style:none;padding-left:0}
+.flash ul.flashlist li{display:flex;align-items:center;gap:8px}
+.flash .flashed{color:var(--combo);font-size:12px}
+
 /* Keyboards: the catalog scrolls inside the sheet, so the chosen keyboard's
    controller and plan stay in view under it. */
 .keyboards .kbpick{max-height:34vh;overflow:auto;border:1px solid var(--line);

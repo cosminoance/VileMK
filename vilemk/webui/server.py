@@ -64,6 +64,10 @@ Endpoints:
                                   `reset=0|1&parts=<json>` lists the targets those
                                   choices would build)
     DELETE /api/build             cancel the running build
+    GET    /api/flash?variant=X   X's firmware files, whether they are fresh, and
+                                  the UF2 bootloader drives mounted now (the
+                                  flash sheet polls it)
+    POST   /api/flash             copy one file onto one drive ({name, file, drive})
 
 The page is the React app under `dist/`, which is not in the repo - `make web`
 writes it, and the static route says so when it is missing.
@@ -84,8 +88,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
-from .. import (PROJECT_DIR, check, custom, firmware, keyboards, keymap, keypos,
-               workspace)
+from .. import (PROJECT_DIR, check, custom, firmware, flash, keyboards, keymap,
+               keypos, workspace)
 
 EMIT = {"viledance": custom.emit_viledance, "combo": custom.emit_combo,
         "modifier": custom.emit_modifier, "layer": custom.emit_layer,
@@ -169,6 +173,14 @@ class Handler(BaseHTTPRequestHandler):
         self.path, _, query = self.path.split("#", 1)[0].partition("?")
         if self.path == "/api/build":
             return self._build_status(parse_qs(query))
+        if self.path == "/api/flash":
+            name = (parse_qs(query).get("variant") or [""])[0]
+            try:
+                files = firmware.firmware_files(name)
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(200, {"files": files, "drives": flash.drives(),
+                                    **firmware.firmware_state(name)})
         if self.path == "/api/keyboards":
             kbs, boards = keyboards.offer(Args().zmk)
             return self._send(200, {"keyboards": kbs, "controllers": boards,
@@ -180,6 +192,11 @@ class Handler(BaseHTTPRequestHandler):
             data["custom"] = custom.load_everything()
             for km in data["keymaps"]:
                 km["parts"] = _parts(km)
+                if km.get("kind") == "variant":
+                    try:
+                        km["firmware"] = firmware.firmware_state(km["name"])
+                    except (ValueError, OSError):
+                        pass
             data["repo_path"] = PROJECT_DIR
             data["zmk"] = workspace.zmk_info()
             data["module_names"] = custom.module_names()
@@ -356,6 +373,14 @@ class Handler(BaseHTTPRequestHandler):
             except (firmware.BuildError, ValueError, OSError) as exc:
                 return self._send(400, {"error": str(exc)})
             return self._send(202, firmware.JOB.since(0))
+
+        if self.path == "/api/flash":
+            try:
+                flash.flash(str(rec.get("name") or ""), str(rec.get("file") or ""),
+                            str(rec.get("drive") or ""))
+            except (flash.FlashError, ValueError, OSError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(200, {})
 
         if self.path == "/api/build/open":
             try:

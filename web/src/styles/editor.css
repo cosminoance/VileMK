@@ -22,6 +22,7 @@ button.act{padding:6px 14px;border:1px solid var(--accent);background:var(--acce
   color:var(--on-accent);border-radius:6px;cursor:pointer;font:inherit}
 button.ghost{padding:6px 14px;border:1px solid var(--line);background:var(--panel);
   color:var(--ink);border-radius:6px;cursor:pointer;font:inherit}
+button.act:disabled,button.ghost:disabled{opacity:.4;cursor:not-allowed}
 button.danger{border-color:var(--danger);color:var(--danger);background:none}
 pre.dts{background:var(--bg);border:1px solid var(--line);border-radius:6px;
   padding:10px;overflow:auto;font-size:11px;max-height:340px;margin:10px 0 0}
@@ -48,8 +49,11 @@ pre.dts{background:var(--bg);border:1px solid var(--line);border-radius:6px;
 .dropmenu button:hover,.dropmenu button:focus-visible{background:var(--accent-soft);
   color:var(--accent);outline:none}
 .dropmenu button.danger{color:var(--danger)}
+.dropmenu button:disabled{color:var(--muted);cursor:default;background:none}
+.dropmenu button small{display:block;font-size:11px;color:var(--muted)}
 .dropmenu.end{left:auto;right:0}
 button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
+button.act.sm{padding:3px 12px;font-size:12px}
 .tdlist{display:flex;flex-wrap:wrap;gap:6px}
 .pk.td{width:auto;height:auto;min-height:38px;padding:4px 12px;align-items:flex-start;
   font-family:var(--font)}

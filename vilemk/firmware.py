@@ -213,6 +213,33 @@ def firmware_files(name: str) -> list:
     return sorted(f for f in os.listdir(folder) if f.endswith(OUTPUTS))
 
 
+def _source_ns(name: str) -> int:
+    """When the variant's keymap or build.yaml last changed, in ns."""
+    out = 0
+    for p in (custom.variant_path(name),
+              os.path.join(custom.variant_dir(name), "build.yaml")):
+        try:
+            out = max(out, os.stat(p).st_mtime_ns)
+        except OSError:
+            pass
+    return out
+
+
+def firmware_state(name: str) -> dict:
+    """-> {uf2, fresh}: how many .uf2 files there are, and whether they were
+    built from the keymap and build.yaml as they are now.
+
+    `_publish()` stamps each output with the source's mtime from when the build
+    was staged, so a save during or after the build makes it stale.
+    """
+    folder = firmware_dir(name)
+    uf2 = [f for f in firmware_files(name) if f.endswith(".uf2")]
+    if not uf2:
+        return {"uf2": 0, "fresh": False}
+    built = min(os.stat(os.path.join(folder, f)).st_mtime_ns for f in uf2)
+    return {"uf2": len(uf2), "fresh": built >= _source_ns(name)}
+
+
 def open_folder(name: str) -> None:
     """Show the variant's firmware folder in the system's file manager."""
     folder = os.path.abspath(firmware_dir(name))
@@ -316,8 +343,9 @@ def _owner(status: dict) -> str:
     return f"{os.getuid()}:{os.getgid()}"
 
 
-def _publish(name: str, root: str) -> list:
-    """Replace `variants/<name>/firmware/`'s outputs with the ones just built."""
+def _publish(name: str, root: str, source_ns: int) -> list:
+    """Replace `variants/<name>/firmware/`'s outputs with the ones just built,
+    each stamped with `source_ns` (see `firmware_state()`)."""
     dest = firmware_dir(name)
     os.makedirs(dest, exist_ok=True)
     for f in os.listdir(dest):
@@ -326,6 +354,7 @@ def _publish(name: str, root: str) -> list:
     out = os.path.join(root, "out")
     for f in sorted(os.listdir(out)):
         shutil.move(os.path.join(out, f), os.path.join(dest, f))
+        os.utime(os.path.join(dest, f), ns=(source_ns, source_ns))
     return firmware_files(name)
 
 
@@ -387,6 +416,7 @@ class Job:
             with open(os.path.join(custom.variant_dir(name), "build.yaml"), "w",
                       encoding="utf-8") as fh:
                 fh.write(yaml_text)
+        source_ns = _source_ns(name)
         root = stage(name)
         with self.lock:
             self.state, self.variant = "running", name
@@ -395,10 +425,11 @@ class Job:
             self.cancelled = False
         argv = command(root, script(tgts, _owner(status)))
         self.thread = threading.Thread(target=self._run,
-                                       args=(name, root, tgts, argv, echo), daemon=True)
+                                       args=(name, root, tgts, argv, echo, source_ns),
+                                       daemon=True)
         self.thread.start()
 
-    def _run(self, name, root, tgts, argv, echo) -> None:
+    def _run(self, name, root, tgts, argv, echo, source_ns) -> None:
         def say(line):
             self.log(line)
             if echo:
@@ -419,7 +450,7 @@ class Job:
         files = []
         if code == 0 and not self.cancelled:
             try:
-                files = _publish(name, root)
+                files = _publish(name, root, source_ns)
                 say(f"wrote {len(files)} file(s) to variants/{name}/{FIRMWARE}/")
             except OSError as exc:
                 say(f"copying the firmware out failed: {exc}")

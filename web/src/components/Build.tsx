@@ -9,6 +9,7 @@ import { api } from "../lib/api";
 import { bindsStudioUnlock } from "../lib/keymaps";
 import { useStore, type State } from "../state/store";
 import { ask } from "./Confirm";
+import { FlashSheet, flashBlock } from "./Flash";
 import { Fold } from "./Fold";
 import { Help } from "./Help";
 import { Toggle } from "./Toggle";
@@ -43,6 +44,7 @@ export function buildChoices(s: State, km: any) {
 
 export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
   const { s, d } = useStore();
+  const [sheet, setSheet] = useState<"build" | "flash" | null>(null);
   const own = km.kind === "variant";
   const { reset, offered, parts } = buildChoices(s, km);
   const has = offered.filter((p) => parts[p.id]).map((p) => p.shield);
@@ -59,8 +61,12 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
     : noDocker ? "needs Docker"
     : dirty ? "save first" : null;
   const choices = [reset ? "with reset" : "", ...has].filter(Boolean).join(" \u00b7 ");
-  return (
+  const noFlash = own ? flashBlock(s, km) : "save as a variant first";
+  return <>
     <Fold title="Build" accent open={s.build} onToggle={(on) => d({ t: "build", on })}
+          actions={<button className="act sm buildbtn" disabled={!!noFlash}
+                           title={noFlash ? `Flash: ${noFlash}` : "Copy the firmware onto the keyboard"}
+                           onClick={() => setSheet("flash")}>Flash</button>}
           summary={<>{choices}{short &&
             <span className="foldwarn">{choices ? " \u00b7 " : ""}{short}</span>}</>}>
       <div className="bar">
@@ -93,29 +99,23 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
           </Help>
         </>}
         <span className="buildgo">
-          <BuildButton km={km} dirty={dirty} off={!own || noDocker}
-                       reset={reset} parts={parts} />
+          <button className="act sm buildbtn" disabled={!own || noDocker}
+                  onClick={() => setSheet("build")}>
+            Build firmware
+          </button>
         </span>
       </div>
       {note && <div className="warn">{note}</div>}
       <div className="hint">These go into the variant's build.yaml when you save or build.</div>
     </Fold>
-  );
+    {sheet === "build" &&
+      <BuildSheet name={km.name} dirty={dirty} choices={{ reset, parts }} noFlash={noFlash}
+                  close={() => setSheet(null)} flash={() => setSheet("flash")} />}
+    {sheet === "flash" && <FlashSheet name={km.name} close={() => setSheet(null)} />}
+  </>;
 }
 
 type Choices = { reset: boolean; parts: Record<string, boolean> };
-
-function BuildButton({ km, dirty, off, ...choices }:
-    { km: any; dirty: number; off: boolean } & Choices) {
-  const [open, setOpen] = useState(false);
-  return <>
-    <button className="act" disabled={off} onClick={() => setOpen(true)}>
-      Build firmware
-    </button>
-    {open && <BuildSheet name={km.name} dirty={dirty} choices={choices}
-                         close={() => setOpen(false)} />}
-  </>;
-}
 
 /** The guard for a build whose keyboard is not in the project. */
 const notInstalled = (missing: string[]) => ask({
@@ -125,8 +125,10 @@ const notInstalled = (missing: string[]) => ask({
     keyboard, or the module it comes from, with <b>Add a keyboard</b> in the sidebar,
     then build again.</> });
 
-function BuildSheet({ name, dirty, choices, close }:
-    { name: string; dirty: number; choices: Choices; close: () => void }) {
+function BuildSheet({ name, dirty, choices, noFlash, close, flash }:
+    { name: string; dirty: number; choices: Choices; noFlash: string | null;
+      close: () => void; flash: () => void }) {
+  const { d } = useStore();
   const [job, setJob] = useState<Job | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -162,7 +164,11 @@ function BuildSheet({ name, dirty, choices, close }:
     const t = setInterval(async () => {
       try {
         const r = await pull(false);
-        if (r.state !== "running") await pull(true);   // the files it wrote
+        if (r.state !== "running") {
+          await pull(true);                              // the files it wrote
+          // and the sidebar's and panel's idea of whether they are fresh
+          d({ t: "data", data: await api("GET", "/api/state") });
+        }
       } catch (e: any) { setErr(e.message); }
     }, POLL_MS);
     return () => clearInterval(t);
@@ -277,6 +283,11 @@ function BuildSheet({ name, dirty, choices, close }:
         <button className="ghost" onClick={close}>
           {running ? "Close (keeps building)" : "Close"}
         </button>
+        {mine && job!.state === "ok" &&
+          <button className="act push" onClick={flash} disabled={!!noFlash}
+                  title={noFlash ? `Flash: ${noFlash}` : undefined}>
+            Flash
+          </button>}
       </div>
     </Modal>
   );
@@ -318,8 +329,9 @@ function FlashNote({ files }: { files: string[] }) {
   const bin = files.some((f) => f.endsWith(".bin"));
   return (
     <div className="msg ok">
-      Built. Put the keyboard into its bootloader (on most boards, double-tap
-      reset) and copy its <code>.uf2</code> onto the drive that appears. A split
+      Built. <b>Flash</b> copies it onto the keyboard for you. By hand: put the
+      keyboard into its bootloader (on most boards, double-tap reset) and copy
+      its <code>.uf2</code> onto the drive that appears. A split
       keyboard has one file per half; flash each half with its own.
       {reset && " Flash the settings_reset files first, then the firmware, then re-pair."}
       {bin && " A .bin file does not copy across; flash it with the board's own tool."}

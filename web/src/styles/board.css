@@ -45,6 +45,9 @@ section.card .foldhead h3{margin:0}
 .foldhead:hover,.foldhead:hover h3{color:var(--accent)}
 .foldhead .chev{display:inline-block;width:1em;line-height:1;text-align:center;transition:transform .12s}
 .fold.open .foldhead .chev{transform:rotate(90deg)}
+.foldrow{display:flex;align-items:center}
+.foldrow .foldhead{flex:1;min-width:0}
+.foldacts{display:flex;gap:6px;padding:4px 12px 4px 0}
 .foldbody{padding:0 12px 10px}
 .foldbody .bar{margin-bottom:0}
 .foldbody .hint{margin-top:6px}
@@ -59,6 +62,8 @@ section.card.fold.accent{border-color:var(--accent);box-shadow:inset 3px 0 0 var
 @media (prefers-reduced-motion:reduce){.foldhead .cursor{animation:none}}
 /* The build button ends the options row, pushed right so it is not read as one of them. */
 .buildgo{display:inline-flex;gap:10px;align-items:center;margin-left:auto}
+/* Flash (in the heading) and Build firmware (under it) line up as one column. */
+.buildbtn{min-width:calc(14ch + 26px)}
 table{border-collapse:collapse;width:100%;font-size:12px}
 /* A label like `&ht_tapbackspace_holdlayer2` is one unbreakable word, and it
    alone is wider than a third of the column. Cells break inside a word rather

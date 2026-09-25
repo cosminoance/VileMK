@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
-export type DropItem = { label: ReactNode; onPick: () => void; danger?: boolean };
+/** `title` says why a `disabled` item is off. */
+export type DropItem = { label: ReactNode; onPick: () => void; danger?: boolean;
+                         disabled?: boolean; title?: string };
 
 /** A button that opens a short list of actions under it. Closes on a pick,
  *  a click elsewhere, or Escape. An icon-only button passes `title` (its name)
@@ -37,6 +39,7 @@ export function Dropdown({ label, items, className = "act", title, caret = true,
         <div className={"dropmenu" + (end ? " end" : "")} role="menu" id={id}>
           {items.map((it, i) => (
             <button key={i} role="menuitem" className={it.danger ? "danger" : ""}
+                    disabled={it.disabled} title={it.title}
                     onClick={() => { setOpen(false); it.onPick(); }}>
               {it.label}
             </button>
