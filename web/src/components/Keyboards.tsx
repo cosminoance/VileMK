@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../state/store";
 import { ask } from "./Confirm";
+import { DriverList, fetchDrivers, type Driver, type Picked } from "./Drivers";
 import { Help } from "./Help";
 import { askLeftover } from "./Leftover";
 import { Modal } from "./Modal";
@@ -11,6 +12,8 @@ interface Kb {
   id: string; name: string; type: "board" | "shield"; source: string; url: string;
   siblings: string[]; requires: string[]; features: string[];
   controllers: string[]; added: boolean; files: string[];
+  /** false: the module has no `*.zmk.yml` for it; named after its shields. */
+  meta: boolean;
 }
 interface Ctl { id: string; name: string; source: string }
 interface Mod { name: string; url: string; ref: string; revision: string; fetched: boolean }
@@ -19,7 +22,6 @@ interface Offer {
   module_names: Record<string, string>;
 }
 interface Plan { build: string; entries: string[]; copy: string[]; kept: string[] }
-
 const key = (k: Kb) => `${k.source}:${k.id}`;
 const short = (sha: string) => sha.slice(0, 7);
 
@@ -46,6 +48,7 @@ function KeyboardsSheet({ close }: { close: () => void }) {
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("main");
   const [renaming, setRenaming] = useState<{ mod: string; alias: string } | null>(null);
+  const [drivers, setDrivers] = useState<{ module: string; list: Driver[] } | null>(null);
 
   const load = async () => setOffer(await api<Offer>("GET", "/api/keyboards"));
   useEffect(() => {
@@ -133,11 +136,23 @@ function KeyboardsSheet({ close }: { close: () => void }) {
     setUrl("");
     setRef("main");
     setQ("");
+    setDrivers(r.drivers?.length ? { module: r.name, list: r.drivers } : null);
     return `added module ${r.name} at ${short(r.revision)}, ${r.files} files: `
       + (r.keyboards
         ? `${r.keyboards} keyboard(s), listed under "From module ${r.name}" below`
-        : "it has no keyboard VileMK can add (none with a *.zmk.yml and a"
-          + " default .keymap)");
+        : "it has no keyboard VileMK can add (no shield folder under"
+          + " boards/shields/, and no board with a *.zmk.yml and a default .keymap)");
+  });
+
+  // Each ticked driver goes through the same fetch as a module typed above.
+  const fetchTicked = (picked: Picked) => act(async () => {
+    const done = new Set<string>();
+    try {
+      await fetchDrivers(picked, (n) => done.add(n));
+    } finally {
+      setDrivers((cur) => cur && { ...cur, list: cur.list.filter((dr) => !done.has(dr.name)) });
+    }
+    return `fetched ${picked.map((p) => `${p.d.name} at ${p.ref}`).join(", ")}`;
   });
 
   // The server swaps the new copy in only when no variant breaks; otherwise it
@@ -258,6 +273,22 @@ function KeyboardsSheet({ close }: { close: () => void }) {
         </ul>
       </>}
 
+      {!!drivers?.list.length && <>
+        <h3>Drivers {label(drivers.module)} uses</h3>
+        <p className="legend">
+          {label(drivers.module)}'s own <code>config/west.yml</code> also fetches
+          these. Tick the ones your keyboard needs. A build that lacks one fails on an unknown{" "}
+          <code>compatible</code> or Kconfig symbol.
+        </p>
+        <DriverList list={drivers.list} busy={busy} actions={(picked) =>
+          <div className="rowbtns">
+            <button className="act" disabled={busy || !picked.length}
+                    onClick={() => fetchTicked(picked)}>
+              {busy ? "Fetching…" : "Fetch ticked"}
+            </button>
+          </div>} />
+      </>}
+
       {offer && <>
         <h3>Add a module from GitHub</h3>
         <div className="fields">
@@ -301,6 +332,7 @@ function KeyboardsSheet({ close }: { close: () => void }) {
                     <small>
                       {k.id} · {k.type === "shield" ? "shield" : "board"}
                       {k.siblings.length ? " · split" : ""}
+                      {!k.meta && " · no metadata"}
                     </small>
                   </button>))}
               </div>)
@@ -325,6 +357,15 @@ function KeyboardsSheet({ close }: { close: () => void }) {
                 build needs to know which controller that is. Only the ones with
                 a matching footprint are listed.
               </Help>
+            </span>
+          </>}
+          {!cur.meta && <>
+            <span>no metadata</span>
+            <span className="note">
+              {label(cur.source)} has no <code>*.zmk.yml</code> for this keyboard,
+              so VileMK named it after its shields
+              ({(cur.siblings.length ? cur.siblings : [cur.id]).join(", ")}) and
+              lists every controller.
             </span>
           </>}
           {!!cur.features.length && <>

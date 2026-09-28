@@ -27,7 +27,9 @@ Endpoints:
     POST   /api/preview           devicetree for an unsaved item
     POST   /api/variant           write variants/<name>/ (keymap + build.yaml;
                                   `reset: true` adds the settings_reset entries,
-                                  `parts` picks the add-on shields)
+                                  `parts` picks the add-on shields, `folder`,
+                                  `entries` and `confs` are a prepared module's
+                                  choices)
     DELETE /api/variant/<name>    remove variants/<name>/
     POST   /api/import/inspect    read a shared keymap, report record collisions
                                   and, for a keyboard not added here, the module
@@ -40,10 +42,13 @@ Endpoints:
                                   the controller boards a shield can sit on, and
                                   the modules in west.yml
     POST   /api/module            fetch a module from GitHub ({url, ref, name}) and
-                                  add it to west.yml
+                                  add it to west.yml; `drivers` lists what its own
+                                  config/west.yml pulls that ours does not
     POST   /api/module/<name>     update it: resolve its ref again, refetch, and swap
                                   in only if no variant breaks ({overwrite, sha}
                                   installs a checked commit anyway)
+    GET    /api/module/<name>/drivers  what its own config/west.yml pulls that
+                                  ours does not, with the refs to offer
     DELETE /api/module/<name>     drop it from west.yml and .zmk/modules/; `left`
                                   lists files that could not be deleted
     POST   /api/module-name       {module, alias}: the name the page shows for a
@@ -57,14 +62,20 @@ Endpoints:
                                   once nothing else in build.yaml uses it. 409 with
                                   `variants` while variants build it
     POST   /api/build             start building one variant ({name}); with
-                                  `reset` (and `parts`) it rewrites the variant's
-                                  build.yaml from those choices first
+                                  `reset` (and `parts`, `folder`, `entries`,
+                                  `confs`) it rewrites the variant's build.yaml
+                                  from those choices first; `rewrites: false`
+                                  skips the modules' CI keymap edits
     POST   /api/build/open        open the variant's firmware folder ({name})
                                   in the system file manager
     GET    /api/build?since=N     the build's state and its log from line N
                                   (`variant=` names whose targets and files to list;
                                   `reset=0|1&parts=<json>` lists the targets those
-                                  choices would build)
+                                  choices would build, as do `folder=`,
+                                  `entries=<json>` and `confs=<json>`; `rewrites`
+                                  lists the CI keymap edits the build would make,
+                                  `drivers` what its prepared modules' own builds
+                                  fetch that west.yml lacks)
     DELETE /api/build             cancel the running build
     GET    /api/flash?variant=X   X's firmware files, whether they are fresh, and
                                   the UF2 bootloader drives mounted now (the
@@ -189,6 +200,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, workspace.refs(url))
             except workspace.WorkspaceError as exc:
                 return self._send(400, {"error": str(exc)})
+        if self.path.startswith("/api/module/") and self.path.endswith("/drivers"):
+            mod = self.path[len("/api/module/"):-len("/drivers")]
+            if (not mod or "/" in mod or mod.startswith(".")
+                    or not os.path.isdir(os.path.join(Args().zmk, "modules", mod))):
+                return self._send(404, {"error": f"no module {mod}"})
+            return self._send(200, {"drivers": workspace.drivers(mod, Args().zmk)})
         if self.path == "/api/keyboards":
             kbs, boards = keyboards.offer(Args().zmk)
             return self._send(200, {"keyboards": kbs, "controllers": boards,
@@ -201,8 +218,10 @@ class Handler(BaseHTTPRequestHandler):
             for km in data["keymaps"]:
                 km["parts"] = _parts(km)
                 if km.get("kind") == "variant":
-                    km["reset"] = custom.has_reset(
-                        os.path.join(os.path.dirname(km["path"]), "build.yaml"))
+                    own = os.path.join(os.path.dirname(km["path"]), "build.yaml")
+                    km["reset"] = custom.has_reset(own)
+                    km["prep"] = (custom.prep_for(km["keyboard"], Args().zmk, own)
+                                  if km.get("keyboard") else None)
                     try:
                         km["firmware"] = firmware.firmware_state(km["name"])
                     except (ValueError, OSError):
@@ -373,11 +392,15 @@ class Handler(BaseHTTPRequestHandler):
             name = str(rec.get("name") or "")
             try:
                 text = (firmware.build_yaml(name, Args().zmk, bool(rec["reset"]),
-                                            _parts_choice(rec.get("parts")))
+                                            _parts_choice(rec.get("parts")),
+                                            **_prep_choice(rec))
                         if "reset" in rec else None)
-                firmware.JOB.start(name, yaml_text=text)
+                firmware.JOB.start(name, yaml_text=text,
+                                   rewrites=rec.get("rewrites") is not False)
             except firmware.Busy as exc:
                 return self._send(409, {"error": str(exc)})
+            except firmware.FolderNeeded as exc:
+                return self._send(400, {"error": str(exc), "need_folder": _need(exc)})
             except firmware.NotInstalled as exc:
                 return self._send(400, {"error": str(exc), "missing": exc.missing})
             except (firmware.BuildError, ValueError, OSError) as exc:
@@ -506,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
             path, build_path, notes = custom.write_variant(
                 name, text, keyboard=km.get("keyboard") or "",
                 zmk_dir=Args().zmk, reset=bool(rec.get("reset")),
-                parts=_parts_choice(rec.get("parts")))
+                parts=_parts_choice(rec.get("parts")), **_prep_choice(rec))
         except (custom.EmitError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"wrote": _rel(path),
@@ -558,6 +581,8 @@ class Handler(BaseHTTPRequestHandler):
         r["updated"] = True
         kbs, _ = keyboards.offer(Args().zmk)
         r["keyboards"] = sum(1 for k in kbs if k["source"] == r["name"])
+        if not name:
+            r["drivers"] = workspace.drivers(r["name"], Args().zmk)
         return self._send(200, r)
 
     # ------------------------------------------------------------- keyboard
@@ -591,17 +616,24 @@ class Handler(BaseHTTPRequestHandler):
         out = firmware.JOB.since(since)
         name = (q.get("variant") or [""])[0]
         if name:
+            text = None
             try:
-                text = None
                 if "reset" in q:
                     parts = json.loads((q.get("parts") or ["null"])[0])
-                    text = firmware.build_yaml(name, Args().zmk,
-                                               q["reset"][0] == "1", _parts_choice(parts))
+                    choice = {k: (q[k][0] if k == "folder" else json.loads(q[k][0]))
+                              for k in ("folder", "entries", "confs") if k in q}
+                    text = firmware.build_yaml(name, Args().zmk, q["reset"][0] == "1",
+                                               _parts_choice(parts), **_prep_choice(choice))
                 out["targets"] = [t["artifact"] for t in
                                   firmware.targets(name, text, Args().zmk)]
+                out["rewrites"] = firmware.ci_rewrites(name, text, Args().zmk)
+                out["drivers"] = firmware.missing_drivers(name, text, Args().zmk)
             except (firmware.BuildError, ValueError) as exc:
                 out["targets"], out["problem"] = [], str(exc)
                 out["missing"] = getattr(exc, "missing", [])
+                if isinstance(exc, firmware.FolderNeeded):
+                    out["need_folder"] = _need(exc)
+            out["confs"] = _confs(name, text)
             out["files"] = firmware.firmware_files(name)
             out["folder"] = _rel(firmware.firmware_dir(name))
             out["path"] = os.path.abspath(firmware.firmware_dir(name))
@@ -895,6 +927,35 @@ def _parts(km) -> list:
     own = (os.path.join(os.path.dirname(km["path"]), "build.yaml")
            if km["kind"] == "variant" else "")
     return custom.parts_for(km["keyboard"], Args().zmk, own)
+
+
+def _prep_choice(rec) -> dict:
+    """A prepared module's choices from the page: `folder` a name, `entries` a
+    list of entry ids, `confs` `{id: bool}` the user changed. A missing one is
+    None, which keeps what the variant's build.yaml has."""
+    folder = rec.get("folder")
+    entries = rec.get("entries")
+    confs = rec.get("confs")
+    return {"folder": str(folder) if isinstance(folder, str) else None,
+            "entries": [str(e) for e in entries] if isinstance(entries, list) else None,
+            "confs": ({str(k): bool(v) for k, v in confs.items()}
+                      if isinstance(confs, dict) else None)}
+
+
+def _need(exc) -> dict:
+    return {"module": exc.module, "folders": exc.folders}
+
+
+def _confs(name: str, text):
+    """The vendor conf ticks for the build sheet, for these choices, or None."""
+    try:
+        path = custom.variant_path(name)
+        m = keypos.KEYBOARD_HINT_RE.search(keymap.read_text(path))
+        if text is None:
+            text = keymap.read_text(os.path.join(custom.variant_dir(name), "build.yaml"))
+    except (OSError, ValueError):
+        return None
+    return custom.confs_for(m.group(1), Args().zmk, text) if m else None
 
 
 def _parts_choice(raw):

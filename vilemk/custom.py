@@ -44,7 +44,7 @@ import json
 import os
 import re
 
-from . import PROJECT_DIR, keymap
+from . import PROJECT_DIR, keymap, workspace
 from .check import DISPLAY_SHIELD_RE, _conf_turns_off, _defconfig_turns_on
 CUSTOM_DIR = os.path.join(PROJECT_DIR, "custom")
 DIRS = {"viledance": os.path.join(CUSTOM_DIR, "viledance"),
@@ -1219,7 +1219,7 @@ def _slot(keyboard: str, entry) -> str:
     """The name that says which half an entry builds: the board for a keyboard
     that is its own board, the keyboard shield for one on a generic controller."""
     for n in [entry.board] + entry.shields:
-        if n and (n == keyboard or keymap.split_half(n)[0] == keyboard):
+        if n and _names_keyboard(n, keyboard):
             return n
     return entry.board
 
@@ -1277,19 +1277,23 @@ def _add_flags(cmake_args: str, flags) -> str:
     return cmake_args
 
 
+def _names_keyboard(name: str, keyboard: str) -> bool:
+    """`eyelash_sofle_left`, `charybdis_dongle` (ZMK's own candidate names:
+    `charybdis` is one for it) and `dongle_charybdis_right` all name a part
+    of their keyboard."""
+    base = keymap.split_half(name)[0]
+    return (name == keyboard or base == keyboard or name.startswith(keyboard + "_")
+            or base.endswith("_" + keyboard))
+
+
 def _entries_for(keyboard: str, entries):
     """The entries that build `keyboard`, half by half.
 
     A board carries the keyboard in its own name (`eyelash_sofle_left`); a
     shield on a generic controller carries it in the shield (`corne_left`).
     """
-    out = []
-    for e in entries:
-        names = [e.board] + e.shields
-        if any(n == keyboard or keymap.split_half(n)[0] == keyboard
-               for n in names if n):
-            out.append(e)
-    return out
+    return [e for e in entries
+            if any(_names_keyboard(n, keyboard) for n in [e.board] + e.shields if n)]
 
 
 def _named_entries(keyboard: str, entries):
@@ -1305,6 +1309,178 @@ def _named_entries(keyboard: str, entries):
         e.props.pop("artifact-name", None)
         out.append(e)
     return out
+
+
+# A keyboard whose module only builds through its vendor's own CI
+# (`workspace.module_shape()`). The user picks the shield folder, the vendor's
+# entries and the vendor's `config/*.conf` files; VileMK does not guess which
+# format the vendor meant. The choices live in the variant's build.yaml: the
+# folder and the confs as header lines, the entries by being there.
+FOLDER_LINE = "# vilemk-folder: "
+CONFS_LINE = "# vilemk-confs:"
+FOLDER_RE = re.compile(r"(?m)^#[ \t]*vilemk-folder:[ \t]*([\w.-]+)/([\w.-]+)[ \t]*$")
+CONFS_RE = re.compile(r"(?m)^#[ \t]*vilemk-confs:[ \t]*(.*?)[ \t]*$")
+
+
+def build_choices(text: str) -> dict:
+    """-> {folders: {module: folder}, confs: [module/file] or None}, from a
+    build.yaml's header lines. `confs` is None when none were recorded."""
+    m = CONFS_RE.search(text or "")
+    return {"folders": dict(FOLDER_RE.findall(text or "")),
+            "confs": m.group(1).split() if m else None}
+
+
+def _read(path: str) -> str:
+    return keymap.read_text(path) if path and os.path.isfile(path) else ""
+
+
+def prepared_module(keyboard: str, zmk_dir: str = ".zmk") -> str:
+    """The module `keyboard` comes from, when that module needs preparing."""
+    mods = os.path.join(zmk_dir, "modules")
+    if not os.path.isdir(mods):
+        return ""
+    for m in sorted(os.listdir(mods)):
+        if m.startswith("."):
+            continue
+        shape = workspace.module_shape(zmk_dir, m)
+        if shape["prepare"] and any(_names_keyboard(s, keyboard)
+                                    for fs in shape["folders"].values() for s in fs):
+            return m
+    return ""
+
+
+def entry_id(e) -> str:
+    return "|".join([e.board, " ".join(e.shields), e.get("snippet") or ""])
+
+
+def _module_entries(zmk_dir: str, module: str):
+    for fn in ("build.yaml", "build.yml"):
+        path = os.path.join(zmk_dir, "modules", module, fn)
+        if os.path.isfile(path):
+            return [e for e in keymap.parse_build_yaml(keymap.read_text(path))
+                    if not any(s in keymap.UTILITY_SHIELDS for s in e.shields)]
+    return []
+
+
+def _format_names(fmt: str, folder: str) -> bool:
+    """`format: bt` names the folder `charybdis-bt`."""
+    return bool(fmt and folder) and (folder == fmt or folder.endswith(("-" + fmt, "_" + fmt)))
+
+
+def _same_entry(v, e, keyboard: str, exact: bool) -> bool:
+    """Whether the variant's entry `e` is the vendor's entry `v`: the same board
+    and keyboard shields, and the same snippet, or (not `exact`) the Studio
+    snippet the keymap put on a central half that had none."""
+    mine = {s for s in v.shields if _names_keyboard(s, keyboard)}
+    if e.board != v.board or not mine <= set(e.shields):
+        return False
+    vs, es = v.get("snippet") or "", e.get("snippet") or ""
+    return vs == es or (not exact and not vs and es == STUDIO_SNIPPET and _is_central(e))
+
+
+def entries_offer(keyboard: str, zmk_dir: str = ".zmk", build_path: str = "",
+                  folder=None):
+    """What the page offers for a keyboard from a prepared module, or None.
+
+    -> {module, folders, folder, entries: [{id, board, shields, snippet, on}]}.
+    `folders` lists the folders to pick from when the module defines a shield
+    in more than one; `folder` is the one picked (`folder`, else the variant's
+    header line), "" for none. An entry with a shield of the module outside
+    that folder is left out. `on` is what the variant's build.yaml has while
+    its folder is the one offered; otherwise the entries whose `format:` names
+    the folder, and nothing when none does.
+    """
+    module = prepared_module(keyboard, zmk_dir)
+    if not module:
+        return None
+    shape = workspace.module_shape(zmk_dir, module)
+    text = _read(build_path)
+    recorded = build_choices(text)["folders"].get(module, "")
+    choose = sorted(shape["folders"]) if shape["twice"] else []
+    folder = recorded if folder is None else folder
+    if folder not in choose:
+        folder = ""
+    out = {"module": module, "folders": choose, "folder": folder, "entries": []}
+    if choose and not folder:
+        return out
+    in_module = {s for fs in shape["folders"].values() for s in fs}
+    allowed = set(shape["folders"][folder]) if folder else in_module
+    groups = {}
+    for v in _entries_for(keyboard, _module_entries(zmk_dir, module)):
+        if any(s in in_module and s not in allowed for s in v.shields):
+            continue
+        groups.setdefault(entry_id(v), (v, set()))[1].add(v.get("format") or "")
+    have = [e for e in keymap.parse_build_yaml(text) if RESET_SHIELD not in e.shields]
+    on = set()
+    if (folder == recorded) if choose else bool(have):
+        for e in have:
+            hits = [k for k, (v, _f) in groups.items() if _same_entry(v, e, keyboard, True)]
+            on.update(hits or [k for k, (v, _f) in groups.items()
+                               if _same_entry(v, e, keyboard, False)])
+    else:
+        on = {k for k, (_v, fmts) in groups.items()
+              if any(_format_names(f, folder) for f in fmts)}
+    out["entries"] = [{"id": k, "board": v.board, "shields": v.shields,
+                       "snippet": v.get("snippet") or "", "on": k in on}
+                      for k, (v, _f) in groups.items()]
+    return out
+
+
+def conf_applies(stem: str, board: str, shield: str) -> bool:
+    """ZMK's rule for `${ZMK_CONFIG}/<stem>.conf`: the shield's name or a
+    shorter `_` prefix of it, alone or with `_<board>`, or the board, or
+    `default`. Every match applies, not only the first."""
+    pieces = shield.split("_")
+    names = ["_".join(pieces[:i]) for i in range(len(pieces), 0, -1)]
+    return stem in (board, "default") or any(stem in (n, f"{n}_{board}") for n in names)
+
+
+def confs_offer(module: str, zmk_dir: str, entries, folder: str = "", text: str = ""):
+    """The repo's `config/*.conf` files for the page, each with the module
+    shields it goes into for these entries. `vendor` is whether the vendor's
+    build applies it; `on` is the variant's recorded choice, else `vendor`."""
+    shape = workspace.module_shape(zmk_dir, module)
+    shields = (set(shape["folders"].get(folder, [])) if folder
+               else {s for fs in shape["folders"].values() for s in fs})
+    recorded = build_choices(text)["confs"]
+    out = []
+    for fn in shape["confs"]:
+        stem = fn[:-len(".conf")]
+        into = sorted({s for e in entries for s in e.shields
+                       if s in shields and conf_applies(stem, e.board, s)})
+        key = f"{module}/{fn}"
+        out.append({"id": key, "file": fn, "shields": into, "vendor": bool(into),
+                    "on": bool(into) and (key in recorded if recorded is not None
+                                          else True)})
+    return out
+
+
+def prep_for(keyboard: str, zmk_dir: str = ".zmk", build_path: str = ""):
+    """What the Build panel offers for a keyboard from a prepared module, or
+    None: `entries_offer()` with `offers`, the entries for every folder the
+    user can pick ("" when there is no folder to pick), and `confs`, the
+    vendor conf ticks the saved build.yaml gives."""
+    offer = entries_offer(keyboard, zmk_dir, build_path)
+    if offer is None:
+        return None
+    offers = {offer["folder"]: offer["entries"]} if offer["folder"] or not offer["folders"] else {}
+    for f in offer["folders"]:
+        if f not in offers:
+            offers[f] = entries_offer(keyboard, zmk_dir, build_path, f)["entries"]
+    return {"module": offer["module"], "folders": offer["folders"],
+            "folder": offer["folder"], "offers": offers,
+            "confs": confs_for(keyboard, zmk_dir, _read(build_path)) or []}
+
+
+def confs_for(keyboard: str, zmk_dir: str, text: str):
+    """`confs_offer()` for the entries and folder a build.yaml text has, or
+    None when the keyboard is not from a prepared module."""
+    module = prepared_module(keyboard, zmk_dir)
+    if not module:
+        return None
+    entries = [e for e in keymap.parse_build_yaml(text) if RESET_SHIELD not in e.shields]
+    return confs_offer(module, zmk_dir, entries,
+                       build_choices(text)["folders"].get(module, ""), text)
 
 
 class Notice(str):
@@ -1351,7 +1527,8 @@ def _without_keymap_file(cmake_args: str) -> str:
 
 
 def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
-                   keymap_text: str = "", reset: bool = False, parts=None):
+                   keymap_text: str = "", reset: bool = False, parts=None,
+                   build_path: str = "", folder=None, entries=None, confs=None):
     """-> (build.yaml text, warnings) for one keyboard and one keymap.
 
     Reads the project, so the caller must already be `chdir`-ed into it -
@@ -1369,8 +1546,14 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
     `parts` is `{part_id: bool}` for the add-on shields the vendor lists
     (`parts_for()`): ticked ones are kept or added, unticked ones dropped. None
     keeps the source entries' shields as they are.
+
+    For a keyboard from a prepared module (`entries_offer()`), the entries are
+    the vendor's that `entries` ticks (ids from `entry_id()`), `folder` the
+    shield folder and `confs` the ticked `config/*.conf` files, as a list of
+    ids or as `{id: bool}` over `confs_offer()`'s defaults. None keeps what
+    the variant's current `build_path` has.
     """
-    warnings, source = [], ""
+    warnings, source, top = [], "", ""
     feature_flags, studio = _feature_flags(keymap_text)
     if feature_flags:
         warnings.append(
@@ -1381,9 +1564,10 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
             f"the keymap binds &studio_unlock, so the central half gets "
             f"`snippet: {STUDIO_SNIPPET}` and {STUDIO_FLAG}")
 
+    offer = entries_offer(keyboard, zmk_dir, build_path, folder)
     own = keymap.find_build_yaml()
     picked = (_entries_for(keyboard, keymap.parse_build_yaml(keymap.read_text(own)))
-              if own else [])
+              if own and offer is None else [])
     # A `settings_reset` entry is not a firmware entry: it builds a stub that
     # wipes the partition, and stamping KEYMAP_FILE or a feature flag onto it
     # would be wrong. Drop them here and let `_reset_body()` write clean ones,
@@ -1398,7 +1582,32 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
             warnings.append(
                 f"the source build list has `shield: {RESET_SHIELD}` entries and "
                 "this one does not - tick `include reset` to keep them")
-    if picked:
+    if offer is not None:
+        ids = (set(entries) if entries is not None
+               else {x["id"] for x in offer["entries"] if x["on"]})
+        vendor = {}
+        for v in _entries_for(keyboard, _module_entries(zmk_dir, offer["module"])):
+            vendor.setdefault(entry_id(v), v)
+        picked = [vendor[x["id"]] for x in offer["entries"] if x["id"] in ids]
+        for e in picked:
+            e.props.pop("artifact-name", None)
+        source = f"{offer['module']}'s build list, as ticked in the Build panel"
+        if offer["folder"]:
+            top += f"{FOLDER_LINE}{offer['module']}/{offer['folder']}\n"
+        chosen = confs if confs is not None else build_choices(_read(build_path))["confs"]
+        if isinstance(chosen, dict):
+            chosen = [c["id"] for c in confs_offer(offer["module"], zmk_dir, picked,
+                                                   offer["folder"], _read(build_path))
+                      if chosen.get(c["id"], c["on"])]
+        if chosen is not None:
+            top += f"{CONFS_LINE} {' '.join(chosen)}".rstrip() + "\n"
+        if not picked:
+            head = ("# No build entry is ticked yet. Pick them in the Build panel.\n")
+            if offer["folders"] and not offer["folder"]:
+                head = ("# The shield folder is not picked yet. Pick it in the Build\n"
+                        "# panel, then the entries to build.\n")
+            return _build_yaml_text(keyboard, keymap_name, head, [], top), warnings
+    elif picked:
         source = f"the project's own {own}"
     else:
         vendor = [e for e in keymap.vendor_build_entries(zmk_dir)
@@ -1512,12 +1721,13 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
             + (",\n# plus the flags for the feature-gated behaviors the keymap"
                "\n# binds - a bound behavior only works when its feature is"
                "\n# compiled in.\n" if feature_flags or studio else ".\n"))
-    return _build_yaml_text(keyboard, keymap_name, head, body), warnings
+    return _build_yaml_text(keyboard, keymap_name, head, body, top), warnings
 
 
-def _build_yaml_text(keyboard, keymap_name, head, body) -> str:
+def _build_yaml_text(keyboard, keymap_name, head, body, top="") -> str:
     return (
-        f"# The build list for the `{keyboard}` variant in this folder.\n"
+        top
+        + f"# The build list for the `{keyboard}` variant in this folder.\n"
         "# Written by VileMK. Building the variant builds every entry below\n"
         f"# with {keymap_name}; the build adds -DKEYMAP_FILE itself.\n"
         "#\n"
@@ -1561,15 +1771,17 @@ def delete_variant(name: str) -> bool:
 
 
 def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk",
-                  reset: bool = False, parts=None):
+                  reset: bool = False, parts=None, folder=None, entries=None,
+                  confs=None):
     """Write `variants/<name>/` - the keymap, and the build list that builds it.
 
     -> (keymap path, build.yaml path or "", warnings). The build list is skipped
     only when we were not told which keyboard this is; the keymap is always
     written, since it is the thing the user asked for.
 
-    `reset` adds the `settings_reset` entries to that build list, and `parts`
-    picks its add-on shields - see `build_yaml_for()`.
+    `reset` adds the `settings_reset` entries to that build list, `parts`
+    picks its add-on shields, and `folder`, `entries` and `confs` are a
+    prepared module's choices - see `build_yaml_for()`.
     """
     p = variant_path(name)
     os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -1588,10 +1800,11 @@ def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk
 
     build_path = ""
     if keyboard:
+        build_path = os.path.join(os.path.dirname(p), "build.yaml")
         yaml_text, yaml_warnings = build_yaml_for(
             keyboard, os.path.basename(p), zmk_dir, keymap_text=text, reset=reset,
-            parts=parts)
-        build_path = os.path.join(os.path.dirname(p), "build.yaml")
+            parts=parts, build_path=build_path, folder=folder, entries=entries,
+            confs=confs)
         with open(build_path, "w", encoding="utf-8") as fh:
             fh.write(yaml_text)
         warnings += yaml_warnings

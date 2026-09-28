@@ -60,6 +60,20 @@ the same dialog; its keyboards then appear in the list. Adding a keyboard puts
 its vendor keymap under **Vendor defaults** in the sidebar. For a keyboard that
 plugs into a separate controller, you pick the controller.
 
+Some keyboards need more modules than their own, such as a trackball or
+encoder driver. When a fetched module's own `config/west.yml` lists modules
+this project does not have, the dialog shows them under **Drivers ... uses**,
+each with a tick and a branch or tag. They are unticked: at this point VileMK
+only knows that the vendor's build fetches them, not which ones your keyboard
+uses. You can fetch them here, or leave them for later. The list is gone
+once the dialog closes.
+
+Which ones a build needs shows up when you build a variant. If the modules the
+variant builds from fetch drivers that are still missing, **Build** lists them
+in **Add the drivers first**, all ticked, before it starts. **Fetch and build**
+adds the ticked ones and builds; **Build without** builds as is, for a driver
+the keyboard does not use. See [Drivers and other dependencies](TROUBLESHOOTING.md#drivers-and-other-dependencies).
+
 ### 5. Make a variant
 
 Select the vendor default, change what you want on the board, and press
@@ -83,6 +97,13 @@ variant on screen:
   half. Tick the ones physically on your keyboard. An unticked screen also
   switches the display off for that half, so the build does not fail looking
   for hardware that is not there.
+- **folder** appears when the vendor keeps the keyboard in more than one
+  folder, one per way of building it. Charybdis has `charybdis-bt` (the halves
+  talk to the computer over Bluetooth) and `charybdis-dongle` (a separate
+  dongle does). Pick the one that matches your hardware. Build stays off until
+  you do.
+
+<img src=".github/images/build-folder.png" width="800" alt="The Build panel for a Charybdis variant with the folder select open, offering charybdis-bt and charybdis-dongle">
 
 **Build firmware** uses those choices even if you haven't saved, and the
 variant remembers them. The build log streams into the dialog, and the build
@@ -274,6 +295,25 @@ docker volume rm vilemk-zmk
 ```
 
 The next build fetches them again.
+
+### Repositories built by their maker's own CI
+
+Some keyboard repositories only build through their maker's GitHub workflow,
+which deletes or copies files first. VileMK recognises the usual steps and
+builds from a prepared copy under `.zmk/stage/`, leaving `.zmk/modules/` as
+fetched. Where the repository offers more than one way to build, you pick:
+
+- **folder**: shown in the Build panel when the repository keeps the keyboard
+  in several folders (for example Bluetooth and dongle). Build stays off until
+  one is picked.
+- **builds**: the maker's own build entries, to tick. Build stays off when
+  none is ticked, or when one half is ticked twice.
+- **vendor settings**: in the build sheet, the maker's `config/*.conf` files,
+  ticked the way the maker's build applies them.
+
+The drivers such a repository pulls in are listed after fetching it, in the
+keyboards sheet, and again by **Build** for any still missing (see step 4). [TROUBLESHOOTING.md](TROUBLESHOOTING.md#repositories-vilemk-prepares)
+has the details and a Charybdis example.
 
 ### Parts the vendor lists
 

@@ -6,9 +6,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
-import { buildChoices } from "../lib/keymaps";
-import { useStore } from "../state/store";
+import { buildChoices, choicesBody, type VendorConf } from "../lib/keymaps";
+import { useStore, type State } from "../state/store";
 import { ask } from "./Confirm";
+import { DriverList, fetchDrivers, type Driver, type Picked } from "./Drivers";
 import { FlashSheet, flashBlock } from "./Flash";
 import { Fold } from "./Fold";
 import { Help } from "./Help";
@@ -27,16 +28,133 @@ type Job = {
   problem?: string;
   /** Boards or shields the build names that `.zmk/` does not have. */
   missing?: string[];
+  /** A module keeps the keyboard in several folders and none is picked. */
+  need_folder?: { module: string; folders: string[] };
+  /** The vendor's `config/*.conf` files, for a keyboard from a prepared module. */
+  confs?: VendorConf[] | null;
+  /** Keymap edits the module's own CI makes for this folder. */
+  rewrites?: CiRewrite[];
+  /** What the prepared modules' own builds fetch that west.yml lacks. */
+  drivers?: ModDriver[];
   folder?: string;
   path?: string;
   docker?: { ok: boolean; reason: string };
 };
 
+type CiRewrite = { module: string; old: string; new: string; file: string };
+type ModDriver = Driver & { module: string };
+
+/** Asked before a build whose modules' own builds fetch drivers west.yml
+ *  lacks: without them it fails late, on an undefined Kconfig symbol or an
+ *  unknown `compatible`. The status lists them without refs (no API calls on
+ *  every sheet open); the refs are asked for here. `done(true)` after the
+ *  ticked ones are fetched, `done(false)` for Build without. */
+function NeedDrivers({ list, cancel, done }:
+    { list: ModDriver[]; cancel: () => void; done: (fetched: boolean) => void }) {
+  const [full, setFull] = useState<ModDriver[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [left, setLeft] = useState(list);
+  const { s } = useStore();
+  const mods = [...new Set(list.map((dr) => dr.module))];
+
+  useEffect(() => {
+    Promise.all(mods.map((m) =>
+      api<{ drivers: Driver[] }>("GET", `/api/module/${encodeURIComponent(m)}/drivers`)
+        .then((r) => r.drivers.map((dr) => ({ ...dr, module: m })))
+        .catch(() => list.filter((dr) => dr.module === m))))
+      .then((rs) => setFull(rs.flat().filter((dr) =>
+        list.some((l) => l.name === dr.name && l.module === dr.module))));
+  }, []);
+
+  const fetchTicked = async (picked: Picked) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await fetchDrivers(picked, (n) => setLeft((l) => l.filter((dr) => dr.name !== n)));
+      done(true);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shown = (full ?? list).filter((dr) => left.some((l) => l.name === dr.name));
+  return (
+    <Modal onClose={busy ? undefined : cancel} className="confirm needdrivers"
+           onKeyDown={(e) => { if (e.key === "Escape" && !busy) cancel(); }}>
+      <h2>Add the drivers first</h2>
+      <div className="body">
+        <p>{mods.map((m) => s.data.module_names?.[m] || m).join(", ")}'s own build also fetches these, and this project
+          does not have them yet. Without the ones the keyboard uses, the build
+          fails partway through.
+          Each ticked one is added as a module, like one added in <b>Add a
+          keyboard</b>, then the build starts.</p>
+        {!full && <p>Listing their branches{"\u2026"}</p>}
+      </div>
+      <DriverList key={full ? "full" : "bare"} list={shown} busy={busy || !full} on
+                  actions={(picked) => <>
+        {err && <div className="msg bad">{err}</div>}
+        <div className="bar actions">
+          <button className="ghost" disabled={busy} onClick={cancel}>Cancel</button>
+          <button className="ghost danger" disabled={busy} onClick={() => done(false)}>
+            Build without</button>
+          <Help label="what Build without does">
+            Builds with what this project has. Only for a driver the keyboard
+            does not use.
+          </Help>
+          <button className="act" disabled={busy || !full || !picked.length}
+                  onClick={() => fetchTicked(picked)}>
+            {busy ? "Fetching\u2026" : "Fetch and build"}
+          </button>
+        </div>
+      </>} />
+    </Modal>);
+}
+
+/** Whether to make the CI's keymap edits: true, false, or null to not build. */
+async function confirmRewrites(rw: CiRewrite[]): Promise<boolean | null> {
+  const a = await ask({
+    title: "Apply the vendor's keymap changes?",
+    ok: "Apply and build",
+    extra: { label: "Build without",
+             tip: "Builds your keymap unchanged, for when the vendor's step does not fit your keyboard." },
+    body: <>
+      <p>{rw[0].module}'s own build changes its keymap for this folder before
+        building ({rw.map((r) => r.file).filter((f, i, a) => a.indexOf(f) === i)
+          .map((f) => <code key={f}>{f}</code>)}). Your keymap started from theirs:</p>
+      <ul>{rw.map((r) => (
+        <li key={r.old}><code>{r.old}</code> becomes <code>{r.new}</code></li>))}</ul>
+      <p>The change goes into the build only; your variant's keymap stays as it is.</p>
+    </> });
+  return a === "extra" ? false : a ? true : null;
+}
+
+/** Why a prepared module's choices cannot build yet, or null. Like
+ *  `flashBlock()`, said beside the disabled button. */
+export function buildBlock(s: State, km: any): string | null {
+  const { prep, folder, vendor, entries } = buildChoices(s, km);
+  if (!prep) return null;
+  if (prep.folders.length && !folder) return "pick the shield folder first";
+  const ticked = vendor.filter((e) => entries[e.id]);
+  if (!ticked.length) return "tick at least one entry to build";
+  const seen = new Set<string>();
+  for (const e of ticked) {
+    const half = `${e.shields.join(" ")} on ${e.board}`;
+    if (seen.has(half)) return `${half} is ticked twice; untick one`;
+    seen.add(half);
+  }
+  return null;
+}
+
 export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
   const { s, d } = useStore();
   const [sheet, setSheet] = useState<"build" | "flash" | null>(null);
   const own = km.kind === "variant";
-  const { reset, offered, parts } = buildChoices(s, km);
+  const choice = buildChoices(s, km);
+  const { reset, offered, parts, prep, folder, vendor, entries } = choice;
+  const block = own ? buildBlock(s, km) : null;
   const has = offered.filter((p) => parts[p.id]).map((p) => p.shield);
   const docker = s.data.build;
   const noDocker = !!docker && !docker.ok;
@@ -45,12 +163,15 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
   const note = !own
     ? "Save this keymap as a variant first (Save as\u2026), then build the variant."
     : noDocker ? `Building needs Docker: ${docker.reason}. Everything else works without it.`
+    : block ? `Build: ${block}.`
     : dirty ? `${dirty} unsaved change(s) are not in the build. Save first to include them.`
     : null;
   const short = !own ? "save as a variant first"
     : noDocker ? "needs Docker"
+    : block ? block
     : dirty ? "save first" : null;
-  const choices = [reset ? "with reset" : "", ...has].filter(Boolean).join(" \u00b7 ");
+  const choices = [folder, reset ? "with reset" : "", ...has]
+    .filter(Boolean).join(" \u00b7 ");
   const noFlash = own ? flashBlock(s, km) : "save as a variant first";
   return <>
     <Fold title="Build" accent open={s.build} onToggle={(on) => d({ t: "build", on })}
@@ -59,6 +180,8 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
                            onClick={() => setSheet("flash")}>Flash</button>}
           summary={<>{choices}{short &&
             <span className="foldwarn">{choices ? " \u00b7 " : ""}{short}</span>}</>}>
+      {prep && own && <PrepChoices km={km} prep={prep} folder={folder} vendor={vendor}
+                                   entries={entries} />}
       <div className="bar">
         {/* A keyboard ZMK Studio has written to ignores the compiled keymap at
             those key positions, on every boot, until the partition is wiped - and
@@ -89,7 +212,7 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
           </Help>
         </>}
         <span className="buildgo">
-          <button className="act sm buildbtn" disabled={!own || noDocker}
+          <button className="act sm buildbtn" disabled={!own || noDocker || !!block}
                   onClick={() => setSheet("build")}>
             Build firmware
           </button>
@@ -99,13 +222,55 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
       <div className="hint">These go into the variant's build.yaml when you save or build.</div>
     </Fold>
     {sheet === "build" &&
-      <BuildSheet name={km.name} dirty={dirty} choices={{ reset, parts }} noFlash={noFlash}
+      <BuildSheet name={km.name} kmId={km.id} dirty={dirty} choices={choicesBody(choice)}
+                  confs={choice.confs} noFlash={noFlash}
                   close={() => setSheet(null)} flash={() => setSheet("flash")} />}
     {sheet === "flash" && <FlashSheet name={km.name} close={() => setSheet(null)} />}
   </>;
 }
 
-type Choices = { reset: boolean; parts: Record<string, boolean> };
+/** A prepared module's shield folder and vendor entries. The user picks: a
+ *  repo that builds several ways has no one right answer VileMK could infer. */
+function PrepChoices({ km, prep, folder, vendor, entries }:
+    { km: any; prep: any; folder: string; vendor: any[];
+      entries: Record<string, boolean> }) {
+  const { d } = useStore();
+  return <>
+    {!!prep.folders.length &&
+      <div className="bar">
+        <span className="path">folder</span>
+        <select value={folder} aria-label="shield folder"
+                onChange={(e) => d({ t: "prepFolder", kmId: km.id, folder: e.target.value })}>
+          {!folder && <option value="">pick one{"\u2026"}</option>}
+          {prep.folders.map((f: string) => <option key={f} value={f}>{f}</option>)}
+        </select>
+        <Help label="what the folder is">
+          {prep.module} keeps this keyboard in more than one folder, one for each
+          way it can be built (for example Bluetooth only, or with a dongle). Its
+          own build deletes the others first. Pick the one your keyboard is built
+          as; VileMK builds from a copy with only that folder.
+        </Help>
+      </div>}
+    {!!vendor.length &&
+      <div className="bar">
+        <span className="path">builds</span>
+        {vendor.map((e) => (
+          <Toggle key={e.id} checked={entries[e.id]}
+                  onChange={(on) => d({ t: "prepEntry", kmId: km.id, id: e.id, on })}>
+            {e.shields.join(" ")} <span className="path">
+              {e.board}{e.snippet ? ` \u00b7 ${e.snippet}` : ""}</span>
+          </Toggle>
+        ))}
+        <Help label="what the entries are">
+          The firmware files in {prep.module}'s own build list for this folder.
+          Each ticked one is built. The vendor lists some halves more than once,
+          for example with and without ZMK Studio; tick one of each.
+        </Help>
+      </div>}
+  </>;
+}
+
+type Choices = Record<string, unknown>;
 
 /** The guard for a build whose keyboard is not in the project. */
 const notInstalled = (missing: string[]) => ask({
@@ -115,8 +280,15 @@ const notInstalled = (missing: string[]) => ask({
     keyboard, or the module it comes from, with <b>Add a keyboard</b> in the sidebar,
     then build again.</> });
 
-function BuildSheet({ name, dirty, choices, noFlash, close, flash }:
-    { name: string; dirty: number; choices: Choices; noFlash: string | null;
+/** The guard for a build whose module needs a folder picked. */
+const needFolder = (need: { module: string; folders: string[] }) => ask({
+  info: true, title: "Pick the shield folder",
+  body: <>{need.module} keeps this keyboard in {need.folders.join(" and ")}. Pick
+    one in the Build panel, then build again.</> });
+
+function BuildSheet({ name, kmId, dirty, choices, confs, noFlash, close, flash }:
+    { name: string; kmId: string; dirty: number; choices: Choices;
+      confs: Record<string, boolean>; noFlash: string | null;
       close: () => void; flash: () => void }) {
   const { d } = useStore();
   const [job, setJob] = useState<Job | null>(null);
@@ -126,13 +298,16 @@ function BuildSheet({ name, dirty, choices, noFlash, close, flash }:
   const log = useRef<HTMLPreElement>(null);
   const stick = useRef(true);
   const [copied, setCopied] = useState(false);
+  const [needDrivers, setNeedDrivers] = useState(false);
 
-  // `reset` and `parts` make the listed targets the ones the build will run,
-  // saved or not.
+  // The choices make the listed targets the ones the build will run, saved or
+  // not.
   const q = (since: number, full: boolean) =>
     `/api/build?since=${since}` + (full ? `&variant=${encodeURIComponent(name)}`
       + `&reset=${choices.reset ? 1 : 0}`
-      + `&parts=${encodeURIComponent(JSON.stringify(choices.parts))}` : "");
+      + Object.entries(choices).filter(([k]) => k !== "reset").map(([k, v]) =>
+          `&${k}=${encodeURIComponent(typeof v === "string" ? v : JSON.stringify(v))}`)
+        .join("") : "");
 
   const pull = async (full: boolean) => {
     const r: Job = await api("GET", q(next.current, full));
@@ -144,7 +319,8 @@ function BuildSheet({ name, dirty, choices, noFlash, close, flash }:
 
   useEffect(() => {
     pull(true).then(async (r) => {
-      if (r.missing?.length) { await notInstalled(r.missing); close(); }
+      if (r.need_folder) { await needFolder(r.need_folder); close(); }
+      else if (r.missing?.length) { await notInstalled(r.missing); close(); }
     }).catch((e) => setErr(e.message));
   }, []);
 
@@ -170,16 +346,39 @@ function BuildSheet({ name, dirty, choices, noFlash, close, flash }:
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [lines]);
 
-  const start = async () => {
+  const start = () => {
     setErr(null);
+    if (job?.drivers?.length) setNeedDrivers(true);
+    else go();
+  };
+
+  const driversDone = async (fetched: boolean) => {
+    setNeedDrivers(false);
+    if (fetched) {
+      try {
+        d({ t: "data", data: await api("GET", "/api/state") });
+        await pull(true);
+      } catch (e: any) { setErr(e.message); return; }
+    }
+    go();
+  };
+
+  const go = async () => {
+    let rewrites = true;
+    if (job?.rewrites?.length) {
+      const a = await confirmRewrites(job.rewrites);
+      if (a === null) return;
+      rewrites = a;
+    }
     try {
       next.current = 0;
-      const r: Job = await api("POST", "/api/build", { name, ...choices });
+      const r: Job = await api("POST", "/api/build", { name, ...choices, rewrites });
       setLines(r.lines);
       next.current = r.next;
       setJob((prev) => ({ ...prev, ...r }));
     } catch (e: any) {
-      if (e.body?.missing?.length) await notInstalled(e.body.missing);
+      if (e.body?.need_folder) await needFolder(e.body.need_folder);
+      else if (e.body?.missing?.length) await notInstalled(e.body.missing);
       else setErr(e.message);
     }
   };
@@ -236,6 +435,9 @@ function BuildSheet({ name, dirty, choices, noFlash, close, flash }:
           </Help>
         </div>}
 
+      {!!job?.confs?.length &&
+        <VendorConfs kmId={kmId} confs={job.confs} changed={confs} />}
+
       {other && running &&
         <div className="msg bad">{job!.variant} is building. One build runs at a time.</div>}
 
@@ -253,6 +455,9 @@ function BuildSheet({ name, dirty, choices, noFlash, close, flash }:
       {mine && job!.state === "cancelled" &&
         <div className="msg bad">Cancelled. The firmware folder is unchanged.</div>}
       {err && <div className="msg bad">{err}</div>}
+      {needDrivers && job?.drivers &&
+        <NeedDrivers list={job.drivers} cancel={() => setNeedDrivers(false)}
+                     done={driversDone} />}
 
       {!!job?.files?.length && !running &&
         <FileList files={job.files} targets={job.targets || []}>
@@ -281,6 +486,37 @@ function BuildSheet({ name, dirty, choices, noFlash, close, flash }:
       </div>
     </Modal>
   );
+}
+
+/** The vendor's `config/*.conf` files for a prepared module, each going into
+ *  the shields ZMK's own rule would apply it to. Our build never reads the
+ *  vendor's `config/`, so a ticked file is appended to those shields' conf. */
+function VendorConfs({ kmId, confs, changed }:
+    { kmId: string; confs: VendorConf[]; changed: Record<string, boolean> }) {
+  const { d } = useStore();
+  return <>
+    <div className="bar">
+      <span className="path">vendor settings</span>
+      {confs.map((c) => (
+        <Toggle key={c.id} checked={changed[c.id] ?? c.on} disabled={!c.shields.length}
+                onChange={(on) => d({ t: "prepConf", kmId, id: c.id, on })}>
+          {c.file} <span className="path">
+            {c.shields.length ? `into ${c.shields.join(", ")}` : "fits no part built"}
+          </span>
+        </Toggle>
+      ))}
+      <Help label="what the vendor settings are">
+        Settings files from the vendor's <code>config/</code> folder, such as the
+        one that turns a trackball on. The vendor's own build reads them; this
+        one only does when they are ticked.
+      </Help>
+    </div>
+    <div className="warn">
+      These are ticked the way the vendor's own build uses them. Leave them as
+      they are unless you know what they change, or the vendor has told you
+      otherwise.
+    </div>
+  </>;
 }
 
 /** What is in the firmware folder now, against what the next build writes:

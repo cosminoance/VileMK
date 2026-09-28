@@ -1,7 +1,8 @@
 """Adding and removing keyboards: `build.yaml` entries plus the files in `config/`.
 
 The offer is `workspace.catalog()`: every board or shield in ZMK or an installed
-module that ships a `.keymap`. Adding one copies `<id>.conf`, if the vendor
+module that ships a `.keymap`, plus a keyboard per shield base name for a module
+whose `*.zmk.yml` offer none (`synthesised()`). Adding one copies `<id>.conf`, if the vendor
 ships one, into `config/` (never over an existing file) and appends one
 `build.yaml` entry per half. The keymap stays with the vendor: variants start
 from it, and a variant build names its own keymap. A shield also needs the controller it is soldered to, picked from the
@@ -64,10 +65,56 @@ def _config_files(kid: str) -> list:
             if os.path.isfile(p)]
 
 
-def offer(zmk_dir: str = workspace.ZMK_DIR):
-    """-> (keyboards, controllers). A keyboard is a catalog entry with a keymap;
-    `added` says whether the build list already builds it."""
+def synthesised(zmk_dir: str = workspace.ZMK_DIR, cat=None) -> list:
+    """Keyboards for the modules whose `*.zmk.yml` offer none: one per shield
+    base name (`charybdis_left`/`_right` -> `charybdis`, halves as siblings),
+    shaped like a catalog entry with `meta: False`. The name comes from a
+    `*.zmk.yml` with that id anywhere in the module, else the id. A shield
+    that names a base (`charybdis_dongle`) belongs to it; the rest stand alone.
+    """
+    cat = workspace.catalog(zmk_dir) if cat is None else cat
+    mods = os.path.join(zmk_dir, "modules")
+    if not os.path.isdir(mods):
+        return []
+    offered = {e["source"] for e in cat if e["type"] in ("board", "shield") and e["keymap"]}
+    out = []
+    for m in sorted(os.listdir(mods)):
+        if m.startswith(".") or m in offered:
+            continue
+        shape = workspace.module_shape(zmk_dir, m)
+        shields = sorted({sh for fs in shape["folders"].values() for sh in fs
+                          if sh not in keymap.UTILITY_SHIELDS})
+        halves = {}
+        for sh in shields:
+            base, half = keymap.split_half(sh)
+            if half:
+                halves.setdefault(base, []).append(sh)
+        alone = [sh for sh in shields if not keymap.split_half(sh)[1]
+                 and not any(custom._names_keyboard(sh, b) for b in halves)]
+        names = {e["id"]: e["name"] for e in cat if e["source"] == m and e["name"]}
+        root = os.path.join(mods, m, shape["board_root"], "boards", "shields")
+        folder = {sh: os.path.join(root, f) for f, fs in shape["folders"].items()
+                  for sh in fs}
+        for kid, sibs in sorted([*halves.items(), *((a, []) for a in alone)]):
+            out.append({"id": kid, "name": names.get(kid) or kid, "type": "shield",
+                        "source": m, "url": "", "siblings": sibs, "requires": [],
+                        "exposes": [], "features": [],
+                        "dir": folder[(sibs or [kid])[0]], "keymap": True,
+                        "meta": False})
+    return out
+
+
+def _catalog(zmk_dir: str = workspace.ZMK_DIR) -> list:
+    """`workspace.catalog()` plus `synthesised()`."""
     cat = workspace.catalog(zmk_dir)
+    return cat + synthesised(zmk_dir, cat)
+
+
+def offer(zmk_dir: str = workspace.ZMK_DIR):
+    """-> (keyboards, controllers). A keyboard is a catalog entry with a keymap,
+    or a `synthesised()` one; `added` says whether the build list already
+    builds it."""
+    cat = _catalog(zmk_dir)
     path = keymap.find_build_yaml()
     built = keymap.parse_build_yaml(keymap.read_text(path)) if path else []
     boards = []
@@ -89,13 +136,14 @@ def offer(zmk_dir: str = workspace.ZMK_DIR):
                             and all(r in b["exposes"] for r in needs)],
             "added": bool(_entries_of(_names(e), built)),
             "files": _config_files(e["id"]),
+            "meta": e.get("meta", True),
         })
     kbs.sort(key=lambda k: (k["name"].lower(), k["source"]))
     return kbs, boards
 
 
 def _find(kid: str, source: str = "", zmk_dir: str = workspace.ZMK_DIR) -> dict:
-    hits = [e for e in workspace.catalog(zmk_dir)
+    hits = [e for e in _catalog(zmk_dir)
             if e["id"] == kid and e["type"] in ("board", "shield") and e["keymap"]
             and (not source or e["source"] == source)]
     if not hits:
@@ -127,7 +175,8 @@ def entries_for(entry: dict, controller: str = "", zmk_dir: str = workspace.ZMK_
     """-> [{key: value}] the build list gains for `entry`, one per half."""
     halves = entry["siblings"] or [entry["id"]]
     shield = entry["type"] == "shield"
-    vendor = _vendor_entries(entry, zmk_dir)
+    # A synthesised keyboard's vendor list is picked in the Build panel instead.
+    vendor = _vendor_entries(entry, zmk_dir) if entry.get("meta", True) else []
     out = []
     if vendor:
         for v in vendor:
@@ -172,7 +221,8 @@ def plan(kid: str, source: str = "", controller: str = "",
     entries = entries_for(entry, controller, zmk_dir)
     copies, kept = [], []
     src = os.path.join(entry["dir"], entry["id"] + ".conf")
-    if os.path.isfile(src):
+    # A synthesised keyboard's folder may be one of several the user picks from.
+    if entry.get("meta", True) and os.path.isfile(src):
         dst = os.path.join(CONFIG_DIR, entry["id"] + ".conf")
         (kept if os.path.exists(dst) else copies).append((src, dst))
     return {"id": entry["id"], "source": entry["source"], "controller": controller,
@@ -283,7 +333,7 @@ def remove(kid: str, files: bool = True, zmk_dir: str = workspace.ZMK_DIR) -> di
     """Drop the keyboard's entries from the build list, and its `config/` files
     when `files`. Refuses an entry written as the top-level board/shield matrix,
     since removing one name there changes what else gets built."""
-    hits = [e for e in workspace.catalog(zmk_dir) if e["id"] == kid]
+    hits = [e for e in _catalog(zmk_dir) if e["id"] == kid]
     names = set().union(*(_names(e) for e in hits)) if hits else {kid}
     path = keymap.find_build_yaml()
     text = keymap.read_text(path) if path else ""
@@ -340,7 +390,7 @@ def remove_vendor(kid: str, source: str, zmk_dir: str = workspace.ZMK_DIR) -> di
         r.update(remove(kid, zmk_dir=zmk_dir))
     if source != "zmk":
         built = keymap.parse_build_yaml(keymap.read_text(path)) if path else []
-        still = [e["id"] for e in workspace.catalog(zmk_dir)
+        still = [e["id"] for e in _catalog(zmk_dir)
                  if e["source"] == source and e["type"] in ("board", "shield")
                  and _entries_of(_names(e), built)]
         if not still:
@@ -400,7 +450,7 @@ def remove_module(name: str, zmk_dir: str = workspace.ZMK_DIR) -> dict:
     of its keyboards: both would stop building, and the variant would lose its
     layout."""
     names = set()
-    for e in workspace.catalog(zmk_dir):
+    for e in _catalog(zmk_dir):
         if e["source"] == name and e["type"] in ("board", "shield"):
             names |= _names(e)
     users = []
