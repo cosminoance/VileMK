@@ -172,6 +172,53 @@ def refs(url: str) -> dict:
     return {"refs": out}
 
 
+ZMK_LINE_RE = re.compile(r"^v?(\d+)\.(\d+)(?:[.-].*)?$")
+SHORT_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def zmk_line(ref: str) -> str:
+    """`v0.3`, `v0.3-branch`, `v0.3.x` -> `0.3`; a branch like `main` -> ""."""
+    m = ZMK_LINE_RE.match((ref or "").strip())
+    return f"{m.group(1)}.{m.group(2)}" if m else ""
+
+
+def driver_refs(url: str, vendor: str, zmk_ref: str) -> dict:
+    """The refs to offer for a driver a vendor's config pulls: the vendor's
+    own ref, the driver's `zmk-*` branches and its release tags. Two API calls.
+
+    -> {refs: [{ref, kind}], pick, why}. kind is vendor, zmk or release. When
+    the vendor names a branch and the driver has `zmk-<line>` for this
+    project's ZMK line, that is `pick`, and `why` says so. A vendor tag or
+    commit is kept.
+    """
+    owner, repo = parse_github(url)
+    what = f"{owner}/{repo}"
+    base = f"https://api.github.com/repos/{owner}/{repo}"
+    branches = [b.get("name", "") for b in _api_json(f"{base}/branches?per_page=100", what)]
+    tags = [t.get("name", "") for t in _api_json(f"{base}/tags?per_page=100", what)]
+    lines = sorted((b for b in branches if b.startswith("zmk-")), reverse=True)
+    releases = sorted((t for t in tags if RELEASE_TAG_RE.match(t)),
+                      key=lambda t: tuple(int(n or 0)
+                                          for n in RELEASE_TAG_RE.match(t).groups()),
+                      reverse=True)[:10]
+    out = [{"ref": vendor, "kind": "vendor"}] if vendor else []
+    out += [{"ref": b, "kind": "zmk"} for b in lines if b != vendor]
+    out += [{"ref": t, "kind": "release"} for t in releases if t != vendor]
+    branch = vendor in branches or not (SHORT_SHA_RE.match(vendor) or vendor in tags)
+    line = zmk_line(zmk_ref)
+    want = f"zmk-{line}"
+    pick, why = vendor, ""
+    if vendor and branch and line and want in lines and vendor != want:
+        pick = want
+        why = (f"The vendor's config follows the branch {vendor}, which can already "
+               f"need a newer ZMK than this project's {zmk_ref}. The driver keeps "
+               f"{want} for ZMK {line}.")
+    elif vendor and branch and lines and want not in lines and vendor not in lines:
+        why = (f"The driver has branches for other ZMK versions "
+               f"({', '.join(lines)}) and none for this project's {zmk_ref}.")
+    return {"refs": out, "pick": pick, "why": why}
+
+
 def _wanted(rel: str, prefixes) -> bool:
     if prefixes is None:
         return True
@@ -431,9 +478,195 @@ def _board_trees(zmk_dir: str) -> list:
     trees = [os.path.join(zmk_dir, "zmk", "app", "boards")]
     mods = os.path.join(zmk_dir, "modules")
     if os.path.isdir(mods):
-        trees += [os.path.join(mods, m, "boards") for m in sorted(os.listdir(mods))
-                  if not m.startswith(".")]
+        trees += [os.path.normpath(os.path.join(mods, m, board_root(os.path.join(mods, m)),
+                                                "boards"))
+                  for m in sorted(os.listdir(mods)) if not m.startswith(".")]
     return trees
+
+
+def _module_yml(path: str) -> str:
+    for fn in ("module.yml", "module.yaml"):
+        p = os.path.join(path, "zephyr", fn)
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def board_root(path: str) -> str:
+    """Where a module's `boards/` tree is, relative to it: its
+    `zephyr/module.yml`'s `board_root`, else `config` for a zmk-config that
+    keeps its shields in `config/boards/`, else `.`."""
+    yml = _module_yml(path)
+    if yml:
+        try:
+            data = parse_yaml(open(yml, encoding="utf-8").read())
+        except (OSError, UnicodeDecodeError):
+            data = {}
+        build = data.get("build") if isinstance(data, dict) else None
+        settings = build.get("settings") if isinstance(build, dict) else None
+        root = settings.get("board_root") if isinstance(settings, dict) else ""
+        return os.path.normpath(root) if isinstance(root, str) and root else "."
+    if os.path.isdir(os.path.join(path, "config", "boards")):
+        return "config"
+    return "."
+
+
+INCLUDE_RE = re.compile(r'(?m)^[ \t]*#[ \t]*include[ \t]*"([^"]+)"')
+
+
+def _missing_includes(folder: str, config: str) -> list:
+    """Files a shield folder `#include`s that are not in it but are in the
+    repo's `config/`, including what those include in turn."""
+    have = set(os.listdir(folder))
+    out = []
+    todo = sorted(f for f in have if f.endswith((".overlay", ".dtsi")))
+    while todo:
+        fn = todo.pop(0)
+        src = os.path.join(folder if fn in have else config, fn)
+        try:
+            text = open(src, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for inc in INCLUDE_RE.findall(text):
+            if "/" in inc or inc in have or inc in out:
+                continue
+            if os.path.isfile(os.path.join(config, inc)):
+                out.append(inc)
+                todo.append(inc)
+    return out
+
+
+_CASE_RE = re.compile(r"^\s*case\s+.+\s+in\s*$")
+_BRANCH_RE = re.compile(r"^\s*\(?([^\s()]+)\)")
+_SED_RE = re.compile(r"""sed\s+-i\s+(['"])s(.)(.+?)(?<!\\)\2(.*?)(?<!\\)\2g?\1\s+("[^"]*"|'[^']*'|\S+)""")
+
+
+def _sed_literal(pat: str, rep: str, quote: str):
+    """(old, new) for a sed `s` whose pattern is plain text, else None."""
+    if quote == '"' and ("$" in pat or "$" in rep):
+        return None
+    old, i = "", 0
+    while i < len(pat):
+        c = pat[i]
+        if c == "\\" and i + 1 < len(pat):
+            old, i = old + pat[i + 1], i + 2
+            continue
+        if c in ".[*^$":
+            return None
+        old, i = old + c, i + 1
+    new, i = "", 0
+    while i < len(rep):
+        c = rep[i]
+        if c == "\\" and i + 1 < len(rep):
+            if rep[i + 1].isdigit():
+                return None
+            new, i = new + rep[i + 1], i + 2
+            continue
+        new, i = new + (old if c == "&" else c), i + 1
+    return (old, new) if old else None
+
+
+def keymap_rewrites(path: str) -> list:
+    """The literal `sed -i 's/old/new/g' <x>.keymap` edits a module's own CI
+    makes, as [{"when": [glob], "old", "new", "file"}]. `when` is the `case` branch the
+    sed sits in (empty outside one); `firmware.prepared()` matches it against
+    the shield folder the build uses."""
+    wf = os.path.join(path, ".github", "workflows")
+    if not os.path.isdir(wf):
+        return []
+    out = []
+    for fn in sorted(os.listdir(wf)):
+        if not fn.endswith((".yml", ".yaml")):
+            continue
+        try:
+            lines = open(os.path.join(wf, fn), encoding="utf-8", errors="replace").read().splitlines()
+        except OSError:
+            continue
+        depth, when = 0, []
+        for line in lines:
+            if _CASE_RE.match(line):
+                depth, when = depth + 1, []
+                continue
+            if depth and line.strip() == "esac":
+                depth, when = depth - 1, []
+                continue
+            if depth and line.strip() == ";;":
+                when = []
+                continue
+            if depth and not when:
+                m = _BRANCH_RE.match(line)
+                if m:
+                    when = m.group(1).split("|")
+            for m in _SED_RE.finditer(line):
+                if not m.group(5).strip("'\"").endswith(".keymap"):
+                    continue
+                lit = _sed_literal(m.group(3), m.group(4), m.group(1))
+                r = lit and {"when": when, "old": lit[0], "new": lit[1],
+                             "file": f".github/workflows/{fn}"}
+                if r and r not in out:
+                    out.append(r)
+    return out
+
+
+def module_deps(path: str) -> list:
+    """The projects a repo's own `config/west.yml` pulls besides ZMK."""
+    yml = os.path.join(path, "config", "west.yml")
+    if not os.path.isfile(yml):
+        return []
+    try:
+        data = west_yml_read(yml)
+    except (WorkspaceError, OSError, UnicodeDecodeError):
+        return []
+    out = []
+    for p in data["manifest"]["projects"]:
+        name = p.get("name", "") if isinstance(p, dict) else ""
+        if name and name != "zmk":
+            info = project_info(data, name)
+            out.append({"name": name, "url": info["url"], "revision": info["revision"]})
+    return out
+
+
+def module_shape(zmk_dir: str, name: str) -> dict:
+    """What a build has to do to a module before ZMK can use it, from its files.
+
+    `folders` is {folder: [shield]} under its `boards/shields/`, `twice` the
+    shields more than one of those folders defines, `missing_includes`
+    {folder: [file]} what a folder includes from the repo's `config/`.
+    `prepare` is true when the module cannot go through west as it is: no
+    `zephyr/module.yml`, a shield in two folders, or an include only its own
+    CI copies in. `confs` are the repo's `config/*.conf`, `deps` its
+    `config/west.yml` projects, `rewrites` its CI's keymap edits
+    (`keymap_rewrites()`).
+    """
+    path = os.path.join(zmk_dir, "modules", name)
+    root = board_root(path)
+    shields = os.path.normpath(os.path.join(path, root, "boards", "shields"))
+    config = os.path.join(path, "config")
+    folders, missing = {}, {}
+    if os.path.isdir(shields):
+        for f in sorted(os.listdir(shields)):
+            d = os.path.join(shields, f)
+            if f.startswith(".") or not os.path.isdir(d):
+                continue
+            folders[f] = sorted(fn[:-len(".overlay")] for fn in os.listdir(d)
+                                if fn.endswith(".overlay"))
+            if os.path.isdir(config):
+                inc = _missing_includes(d, config)
+                if inc:
+                    missing[f] = inc
+    where = {}
+    for f, names in folders.items():
+        for s in names:
+            where.setdefault(s, []).append(f)
+    twice = {s: fs for s, fs in where.items() if len(fs) > 1}
+    has_yml = bool(_module_yml(path))
+    confs = (sorted(f for f in os.listdir(config) if f.endswith(".conf"))
+             if os.path.isdir(config) else [])
+    return {"name": name, "module_yml": has_yml, "board_root": root,
+            "folders": folders, "twice": twice, "missing_includes": missing,
+            "confs": confs, "deps": module_deps(path),
+            "rewrites": keymap_rewrites(path),
+            "prepare": bool(folders) and (not has_yml or bool(twice) or bool(missing))}
 
 
 def shield_dirs(zmk_dir: str = ZMK_DIR) -> dict:
@@ -711,6 +944,33 @@ def modules(zmk_dir: str = ZMK_DIR) -> list:
         info = project_info(data, name)
         info["fetched"] = os.path.isdir(os.path.join(zmk_dir, "modules", name))
         out.append(info)
+    return out
+
+
+def drivers(name: str, zmk_dir: str = ZMK_DIR, refs: bool = True) -> list:
+    """The projects module `name`'s own `config/west.yml` pulls that
+    `config/west.yml` does not have yet, by name or URL, each with
+    `driver_refs()`, or `error` when those could not be listed. `refs=False`
+    makes no API calls and offers the vendor's ref only."""
+    try:
+        data = west_yml_read()
+    except (WorkspaceError, OSError, UnicodeDecodeError):
+        return []
+    have = {p.get("name", "") for p in data["manifest"]["projects"] if isinstance(p, dict)}
+    urls = {project_info(data, n)["url"].lower().removesuffix(".git") for n in have}
+    zmk_ref = zmk_info(zmk_dir)["ref"]
+    out = []
+    for dep in module_shape(zmk_dir, name)["deps"]:
+        if dep["name"] in have or dep["url"].lower().removesuffix(".git") in urls:
+            continue
+        d = {**dep, "refs": [{"ref": dep["revision"], "kind": "vendor"}],
+             "pick": dep["revision"], "why": ""}
+        try:
+            if refs:
+                d.update(driver_refs(dep["url"], dep["revision"], zmk_ref))
+        except WorkspaceError as exc:
+            d["error"] = str(exc)
+        out.append(d)
     return out
 
 

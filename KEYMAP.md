@@ -1,10 +1,10 @@
 # The keymap tabs
 
-[← back to the README](README.md#designing-a-keymap-every-tab-in-the-app)
+[← back to the README](README.md#behaviours-every-tab-in-the-app)
 
 What each of the eight tabs under the board does and what its settings mean.
 How the tabs, key editor and creation panels work together is in the
-[README](README.md#designing-a-keymap-every-tab-in-the-app).
+[README](README.md#behaviours-every-tab-in-the-app).
 
 - [Keyboard](#keyboard)
 - [Media & system](#media--system)
@@ -174,4 +174,4 @@ flip it on for others yourself.
 
 <img src=".github/images/tab-combos.png" width="380" alt="The Combo panel: a saved chord's Name, Keys, Output key, Timeout and Layers"> <img src=".github/images/tab-conditional-layers.png" width="380" alt="The Conditional layer panel: a saved tri-layer rule's Name, If layers and Then layer">
 
-[← back to the README](README.md#designing-a-keymap-every-tab-in-the-app)
+[← back to the README](README.md#behaviours-every-tab-in-the-app)

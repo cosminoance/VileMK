@@ -36,6 +36,7 @@ v0.3, which carries this notice:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import os
 import shlex
 import shutil
@@ -52,6 +53,7 @@ VOLUME = "vilemk-zmk"
 CONTAINER = "vilemk-build"
 STAGE_DIR = os.path.join(".zmk", "stage")
 CONFIG_AT = "/zmk/config"
+PREPARED_AT = "/zmk/prepared"
 FIRMWARE = "firmware"
 OUTPUTS = (".uf2", ".bin")
 MAX_LINES = 50000
@@ -73,6 +75,18 @@ class NotInstalled(BuildError):
                          f"not installed; add the keyboard, or the module it comes "
                          f"from, in Add a keyboard")
         self.missing = missing
+
+
+class FolderNeeded(BuildError):
+    """A module defines the build's shields in more than one folder, and the
+    variant has not picked one."""
+
+    def __init__(self, module: str, folders: list):
+        super().__init__(f"{module} defines this keyboard in more than one folder "
+                         f"({', '.join(folders)}); pick the one to build in the "
+                         f"Build panel")
+        self.module = module
+        self.folders = folders
 
 
 # ------------------------------------------------------------------ docker
@@ -128,11 +142,13 @@ def artifact_name(board: str, shield: str, name: str = "") -> str:
     return name or f"{shield + '-' if shield else ''}{board}-zmk"
 
 
-def build_yaml(name: str, zmk_dir: str, reset: bool, parts=None) -> str:
+def build_yaml(name: str, zmk_dir: str, reset: bool, parts=None, folder=None,
+               entries=None, confs=None) -> str:
     """The build.yaml the variant gets with these choices, from its saved keymap.
 
-    The page's "include reset" and parts boxes apply to the next build without
-    a save; `JOB.start(yaml_text=)` writes this before it builds.
+    The page's "include reset", parts, folder, entries and conf boxes apply to
+    the next build without a save; `JOB.start(yaml_text=)` writes this before
+    it builds.
     """
     path = custom.variant_path(name)
     try:
@@ -146,7 +162,9 @@ def build_yaml(name: str, zmk_dir: str, reset: bool, parts=None) -> str:
     try:
         out, _warnings = custom.build_yaml_for(
             m.group(1), os.path.basename(path), zmk_dir, keymap_text=text,
-            reset=reset, parts=parts)
+            reset=reset, parts=parts,
+            build_path=os.path.join(custom.variant_dir(name), "build.yaml"),
+            folder=folder, entries=entries, confs=confs)
     except (custom.EmitError, ValueError) as exc:
         raise BuildError(str(exc)) from None
     return out
@@ -199,29 +217,45 @@ def targets(name: str, yaml_text: str | None = None,
                       if n not in have})
     if missing:
         raise NotInstalled(missing)
-    dirs = workspace.shield_dirs(zmk_dir)
-    twice = sorted({s for t in out for s in t["shield"].split() if len(dirs.get(s, [])) > 1})
-    if twice:
-        raise BuildError(_twice({s: dirs[s] for s in twice}, zmk_dir))
+    _check_folders(out, text, zmk_dir)
     return out
 
 
+def _module_of(path: str, zmk_dir: str) -> str:
+    rel = os.path.relpath(path, os.path.join(zmk_dir, "modules"))
+    return "" if rel.startswith("..") else rel.split(os.sep)[0]
+
+
+def _check_folders(tgts: list, text: str, zmk_dir: str) -> None:
+    """A shield in two folders of one module needs the variant's folder pick,
+    and every shield of that module must be in the picked folder. A shield in
+    two modules cannot build at all."""
+    dirs = workspace.shield_dirs(zmk_dir)
+    picked = custom.build_choices(text)["folders"]
+    twice = {}
+    for s in sorted({s for t in tgts for s in t["shield"].split()}):
+        where = dirs.get(s, [])
+        owners = {_module_of(d, zmk_dir) for d in where}
+        if len(owners) > 1 or ("" in owners and len(where) > 1):
+            twice[s] = where
+            continue
+        m = next(iter(owners), "")
+        folders = sorted({os.path.basename(d) for d in where})
+        if len(where) > 1 and not picked.get(m):
+            raise FolderNeeded(m, sorted(workspace.module_shape(zmk_dir, m)["folders"]))
+        if picked.get(m) and folders and picked[m] not in folders:
+            raise BuildError(f"{s} is not in {m}'s {picked[m]} folder; untick its "
+                             f"entry in the Build panel or pick another folder")
+    if twice:
+        raise BuildError(_twice(twice, zmk_dir))
+
+
 def _twice(dirs: dict, zmk_dir: str) -> str:
-    """Why a build with shields Zephyr would find twice cannot run, and the fix."""
-    mods = os.path.join(zmk_dir, "modules")
-    one_module = False
-    lines = []
-    for shield, where in dirs.items():
-        owners = {os.path.relpath(d, mods).split(os.sep)[0] for d in where}
-        one_module |= len(owners) < len(where)
-        lines.append(f"{shield} is in " + " and ".join(os.path.relpath(d, zmk_dir)
-                                                       for d in where))
-    fix = ("A module defines the same shield in two folders, so the build needs a "
-           "fork of it with one folder deleted. Deleting it under .zmk/ does not "
-           "reach the build, which fetches the module from GitHub."
-           if one_module else
-           "Remove all but one of those modules in Add a keyboard.")
-    return "Zephyr would find a shield twice: " + "; ".join(lines) + ". " + fix
+    """Why a build with shields Zephyr would find in two modules cannot run."""
+    lines = [f"{shield} is in " + " and ".join(os.path.relpath(d, zmk_dir) for d in where)
+             for shield, where in dirs.items()]
+    return ("Zephyr would find a shield twice: " + "; ".join(lines)
+            + ". Remove all but one of those modules in Add a keyboard.")
 
 
 def firmware_dir(name: str) -> str:
@@ -280,30 +314,229 @@ def open_folder(name: str) -> None:
 
 # ------------------------------------------------------------------- stage
 
-def stage(name: str) -> str:
+def prepared(tgts: list, text: str, zmk_dir: str = workspace.ZMK_DIR,
+             rewrites: bool = True) -> list:
+    """The modules this build uses that cannot go through west as they are
+    (`workspace.module_shape()`), each with what `stage()` does to its copy:
+    `drop` the folders other than the picked one, copy `includes`
+    ({folder: [file]}) in from its `config/`, write a `zephyr/module.yml` with
+    `module_yml` as board_root when it is set, append `confs`
+    ({"<folder>/<shield>.conf": [file]}) from its `config/`, and apply
+    `rewrites` ([(old, new)]) to the staged keymap: the edits the module's CI
+    makes to its keymap for the folder built (`workspace.keymap_rewrites()`).
+    A keymap started from the vendor's needs them as much as the vendor's does.
+    `rewrites=False` is the user's "build without" in the page's confirm: they
+    go in `skipped` instead.
+    """
+    mods = os.path.join(zmk_dir, "modules")
+    if not os.path.isdir(mods):
+        return []
+    names = {n for t in tgts for n in [t["board"], *t["shield"].split()]}
+    choices = custom.build_choices(text)
+    entries = [e for e in keymap.parse_build_yaml(text)
+               if custom.RESET_SHIELD not in e.shields]
+    out = []
+    for m in sorted(os.listdir(mods)):
+        if m.startswith("."):
+            continue
+        shape = workspace.module_shape(zmk_dir, m)
+        if not shape["prepare"] or not names & {s for fs in shape["folders"].values()
+                                                for s in fs}:
+            continue
+        folder = choices["folders"].get(m, "") if shape["twice"] else ""
+        keep = [folder] if folder else list(shape["folders"])
+        confs = {}
+        for c in custom.confs_offer(m, zmk_dir, entries, folder, text):
+            if not c["on"]:
+                continue
+            for s in c["shields"]:
+                where = next(f for f in keep if s in shape["folders"][f])
+                confs.setdefault(f"{where}/{s}.conf", []).append(c["file"])
+        out.append({"module": m, "board_root": shape["board_root"], "folder": folder,
+                    "drop": [f for f in shape["folders"] if f not in keep],
+                    "includes": {f: shape["missing_includes"][f] for f in keep
+                                 if f in shape["missing_includes"]},
+                    "module_yml": "" if shape["module_yml"] else shape["board_root"],
+                    "confs": confs,
+                    **{"rewrites" if rewrites else "skipped":
+                       [(r["old"], r["new"]) for r in shape["rewrites"]
+                        if _branch_applies(r["when"], keep)]}})
+    return out
+
+
+def _branch_applies(when: list, folders: list) -> bool:
+    """A CI `case` branch outside any case, or one whose glob picks a folder
+    built. A glob that names no folder of the module is about something else."""
+    return not when or any(fnmatch.fnmatch(f, g) for g in when for f in folders)
+
+
+def ci_rewrites(name: str, text: str | None = None,
+                zmk_dir: str = workspace.ZMK_DIR) -> list:
+    """[{module, old, new, file}]: the keymap edits a build of `name` with this
+    build.yaml text would make, for the page to confirm before it builds. Only
+    those whose text the variant's keymap has."""
+    if text is None:
+        text = keymap.read_text(os.path.join(custom.variant_dir(name), "build.yaml"))
+    km = keymap.read_text(custom.variant_path(name))
+    out = []
+    for p in prepared(targets(name, text, zmk_dir), text, zmk_dir):
+        shape = workspace.module_shape(zmk_dir, p["module"])
+        for old, new in p["rewrites"]:
+            if old not in km:
+                continue
+            r = next(r for r in shape["rewrites"] if (r["old"], r["new"]) == (old, new))
+            out.append({"module": p["module"], "old": old, "new": new, "file": r["file"]})
+    return out
+
+
+def missing_drivers(name: str, text: str | None = None,
+                    zmk_dir: str = workspace.ZMK_DIR) -> list:
+    """[{module, name, url, revision, ...}]: what the prepared modules this
+    build uses pull in their own `config/west.yml` and ours lacks
+    (`workspace.drivers()`, without the API calls). Their CI builds with those;
+    ours fails on an unknown Kconfig symbol or `compatible` without them.
+    Only prepared modules: eyelash's config lists drivers it does not need."""
+    if text is None:
+        text = keymap.read_text(os.path.join(custom.variant_dir(name), "build.yaml"))
+    return [{"module": p["module"], **d}
+            for p in prepared(targets(name, text, zmk_dir), text, zmk_dir)
+            for d in workspace.drivers(p["module"], zmk_dir, refs=False)]
+
+
+def drivers_notes(prep=(), zmk_dir: str = workspace.ZMK_DIR) -> list:
+    """One line per driver a prepared module's own build fetches and ours lacks."""
+    return [f"warning: {p['module']}'s own build also fetches {d['name']} ({d['url']}), "
+            f"which config/west.yml does not have"
+            for p in prep for d in workspace.drivers(p["module"], zmk_dir, refs=False)]
+
+
+def describe(prep: dict) -> str:
+    """One line on what `stage()` does to a prepared module."""
+    parts = []
+    if prep["folder"]:
+        parts.append(f"keeps {prep['folder']}, drops {', '.join(prep['drop'])}")
+    for f, files in prep["includes"].items():
+        parts.append(f"copies {', '.join(files)} from config/ into {f}/")
+    if prep["module_yml"]:
+        parts.append(f"writes zephyr/module.yml (board_root: {prep['module_yml']})")
+    for dst, files in prep["confs"].items():
+        parts.append(f"appends config/{', config/'.join(files)} to {dst}")
+    for old, new in prep.get("rewrites", ()):
+        parts.append(f"changes `{old}` to `{new}` in the keymap, as its CI does")
+    for old, new in prep.get("skipped", ()):
+        parts.append(f"leaves `{old}` in the keymap (its CI changes it to `{new}`)")
+    return f"prepared {prep['module']}: " + ("; ".join(parts) or "copied as is")
+
+
+def keymap_includes(name: str, prep=(), zmk_dir: str = workspace.ZMK_DIR) -> dict:
+    """{file: module}: what the variant's keymap `#include "..."`s that is not
+    in `config/` but is in a module's `config/`, with what those include in
+    turn. A keymap started from a vendor's keeps the vendor's includes, which
+    its CI finds next to the keymap. Prepared modules are searched first.
+    """
+    mods = os.path.join(zmk_dir, "modules")
+    order = [p["module"] for p in prep]
+    if os.path.isdir(mods):
+        order += [m for m in sorted(os.listdir(mods))
+                  if not m.startswith(".") and m not in order]
+    dirs = [(m, os.path.join(mods, m, "config")) for m in order]
+    out = {}
+    todo = [custom.variant_path(name)]
+    while todo:
+        try:
+            text = keymap.read_text(todo.pop(0))
+        except OSError:
+            continue
+        for inc in workspace.INCLUDE_RE.findall(text):
+            if "/" in inc or inc in out or os.path.isfile(os.path.join("config", inc)):
+                continue
+            for m, d in dirs:
+                src = os.path.join(d, inc)
+                if os.path.isfile(src):
+                    out[inc] = m
+                    todo.append(src)
+                    break
+    return out
+
+
+def includes_notes(name: str, prep=()) -> list:
+    """One line per module `stage()` copies keymap includes from."""
+    by = {}
+    for fn, m in keymap_includes(name, prep).items():
+        by.setdefault(m, []).append(fn)
+    return [f"copies {', '.join(fs)} from {m}/config/ next to the keymap"
+            for m, fs in by.items()]
+
+
+def stage(name: str, prep=(), zmk_dir: str = workspace.ZMK_DIR) -> str:
     """Copy `config/` plus the variant's keymap into `.zmk/stage/<name>/`.
 
     The copy is what the container sees at /zmk/config, read-only. The
     variant's keymap goes in as `<name>.keymap`, replacing a file of that name
-    in the copy only.
+    in the copy only, with what it includes from a module's `config/`
+    (`keymap_includes()`) and the `rewrites` of each module in `prep`.
+
+    Each module in `prep` (`prepared()`) is copied to `modules/<module>/`,
+    fixed up there, and dropped from the staged west.yml, so west does not
+    also hand Zephyr the original. `.zmk/modules/` is not touched.
     """
     if not os.path.isfile(WEST_YML):
         raise BuildError(f"there is no {WEST_YML}; run `make zmk` first")
     root = os.path.join(STAGE_DIR, name)
     shutil.rmtree(root, ignore_errors=True)
     shutil.copytree("config", os.path.join(root, "config"))
-    shutil.copyfile(custom.variant_path(name),
-                    os.path.join(root, "config", f"{name}.keymap"))
+    staged_keymap = os.path.join(root, "config", f"{name}.keymap")
+    shutil.copyfile(custom.variant_path(name), staged_keymap)
+    rewrites = [r for p in prep for r in p.get("rewrites", ())]
+    if rewrites:
+        text = keymap.read_text(staged_keymap)
+        for old, new in rewrites:
+            text = text.replace(old, new)
+        with open(staged_keymap, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    for fn, m in keymap_includes(name, prep, zmk_dir).items():
+        shutil.copyfile(os.path.join(zmk_dir, "modules", m, "config", fn),
+                        os.path.join(root, "config", fn))
     os.makedirs(os.path.join(root, "out"), exist_ok=True)
+    for p in prep:
+        src = os.path.join(zmk_dir, "modules", p["module"])
+        dst = os.path.join(root, "modules", p["module"])
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".git"))
+        shields = os.path.join(dst, p["board_root"], "boards", "shields")
+        for f in p["drop"]:
+            shutil.rmtree(os.path.join(shields, f))
+        for f, files in p["includes"].items():
+            for fn in files:
+                shutil.copyfile(os.path.join(dst, "config", fn),
+                                os.path.join(shields, f, fn))
+        if p["module_yml"]:
+            os.makedirs(os.path.join(dst, "zephyr"), exist_ok=True)
+            with open(os.path.join(dst, "zephyr", "module.yml"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(f"build:\n  settings:\n    board_root: {p['module_yml']}\n")
+        for rel, files in p["confs"].items():
+            with open(os.path.join(shields, *rel.split("/")), "a", encoding="utf-8") as fh:
+                for fn in files:
+                    body = keymap.read_text(os.path.join(dst, "config", fn))
+                    fh.write(f"\n# config/{fn}, added by VileMK\n{body.rstrip()}\n")
+    if prep:
+        staged = os.path.join(root, WEST_YML)
+        data = workspace.west_yml_read(staged)
+        gone = {p["module"] for p in prep}
+        data["manifest"]["projects"] = [
+            p for p in data["manifest"]["projects"]
+            if not (isinstance(p, dict) and p.get("name") in gone)]
+        workspace.west_yml_write(data, staged)
     return os.path.abspath(root)
 
 
-def script(tgts: list, owner: str = "") -> str:
+def script(tgts: list, owner: str = "", extra=()) -> str:
     """The shell script the container runs. Every value is `shlex.quote`d.
 
     Each entry builds in a fresh directory, as CI does, and a failed entry does
     not stop the rest (CI's `fail-fast: false`). `owner` is `uid:gid` for the
     finished files, or blank to leave them as the container wrote them.
+    `extra` names prepared modules, passed to every build as ZMK_EXTRA_MODULES.
     """
     q = shlex.quote
     lines = [
@@ -322,6 +555,9 @@ def script(tgts: list, owner: str = "") -> str:
         cmd += ["--", f"-DZMK_CONFIG={CONFIG_AT}"]
         if t["shield"]:
             cmd.append(f"-DSHIELD={t['shield']}")
+        if extra:
+            cmd.append("-DZMK_EXTRA_MODULES="
+                       + ";".join(f"{PREPARED_AT}/{m}" for m in extra))
         cmd += t["cmake"]
         west = " ".join('"$d"' if c == "$d" else q(c) for c in cmd)
         art = q(t["artifact"])
@@ -346,12 +582,16 @@ def script(tgts: list, owner: str = "") -> str:
     return "\n".join(lines) + "\n"
 
 
-def command(root: str, body: str) -> list:
-    """The `docker run` argv. Nothing else from the host is mounted."""
+def command(root: str, body: str, prepared: bool = False) -> list:
+    """The `docker run` argv. Nothing else from the host is mounted; the
+    prepared modules, when there are any, go in read-only."""
+    mods = (["--mount", f"type=bind,source={os.path.join(root, 'modules')},"
+                        f"target={PREPARED_AT},readonly"] if prepared else [])
     return ["docker", "run", "--rm", "--name", CONTAINER,
             "--mount", f"type=volume,source={VOLUME},target=/zmk",
             "--mount", f"type=bind,source={os.path.join(root, 'config')},"
                        f"target={CONFIG_AT},readonly",
+            *mods,
             "--mount", f"type=bind,source={os.path.join(root, 'out')},target=/out",
             IMAGE, "bash", "-c", body]
 
@@ -418,10 +658,12 @@ class Job:
                     "files": list(self.files),
                     "started": self.started, "finished": self.finished}
 
-    def start(self, name: str, echo=None, yaml_text: str | None = None) -> None:
+    def start(self, name: str, echo=None, yaml_text: str | None = None,
+              rewrites: bool = True) -> None:
         """Check, stage and launch in a thread. Raises before anything runs.
 
         `yaml_text` replaces the variant's build.yaml first (`build_yaml()`).
+        `rewrites` is whether the modules' CI keymap edits apply (`prepared()`).
         """
         name = custom.variant_slug(name)
         with self.lock:
@@ -434,29 +676,36 @@ class Job:
             raise Busy(f"a {CONTAINER} container is already running, probably "
                        f"from another VileMK; stop it with `docker kill {CONTAINER}`")
         tgts = targets(name, yaml_text)
+        build = os.path.join(custom.variant_dir(name), "build.yaml")
         if yaml_text is not None:
-            with open(os.path.join(custom.variant_dir(name), "build.yaml"), "w",
-                      encoding="utf-8") as fh:
+            with open(build, "w", encoding="utf-8") as fh:
                 fh.write(yaml_text)
+        prep = prepared(tgts, keymap.read_text(build), rewrites=rewrites)
         source_ns = _source_ns(name)
-        root = stage(name)
+        root = stage(name, prep)
         with self.lock:
             self.state, self.variant = "running", name
             self.lines, self.dropped, self.files = [], 0, []
             self.started, self.finished = time.time(), 0.0
             self.cancelled = False
-        argv = command(root, script(tgts, _owner(status)))
+        argv = command(root, script(tgts, _owner(status), [p["module"] for p in prep]),
+                       bool(prep))
         self.thread = threading.Thread(target=self._run,
-                                       args=(name, root, tgts, argv, echo, source_ns),
+                                       args=(name, root, tgts, argv, echo, source_ns,
+                                             [describe(p) for p in prep]
+                                             + includes_notes(name, prep)
+                                             + drivers_notes(prep)),
                                        daemon=True)
         self.thread.start()
 
-    def _run(self, name, root, tgts, argv, echo, source_ns) -> None:
+    def _run(self, name, root, tgts, argv, echo, source_ns, notes=()) -> None:
         def say(line):
             self.log(line)
             if echo:
                 echo(line)
         say(f"building {name}: " + ", ".join(t["artifact"] for t in tgts))
+        for note in notes:
+            say(note)
         say(f"workspace: docker volume {VOLUME}; the first build pulls {IMAGE} and "
             f"all of ZMK and Zephyr, which takes several minutes")
         code = -1
@@ -521,8 +770,14 @@ def main() -> int:
         if args.dry_run:
             name = custom.variant_slug(args.variant)
             tgts = targets(name)
+            prep = prepared(tgts, keymap.read_text(
+                os.path.join(custom.variant_dir(name), "build.yaml")))
             root = os.path.abspath(os.path.join(STAGE_DIR, name))
-            argv = command(root, script(tgts, _owner(docker_status())))
+            argv = command(root, script(tgts, _owner(docker_status()),
+                                        [p["module"] for p in prep]), bool(prep))
+            for note in ([describe(p) for p in prep] + includes_notes(name, prep)
+                         + drivers_notes(prep)):
+                print(f"# {note}")
             print(" ".join(shlex.quote(a) for a in argv[:-1]) + " <<script>>")
             print(argv[-1], end="")
             return 0

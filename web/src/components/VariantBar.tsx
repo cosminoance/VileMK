@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { buildChoices, choicesChanged, slugify } from "../lib/keymaps";
+import { buildChoices, choicesBody, choicesChanged, slugify } from "../lib/keymaps";
 import { layersOf } from "../lib/layers";
 import { deleteVariant, saveVariant } from "../state/actions";
 import { reducer, useStore, type Action, type State } from "../state/store";
@@ -20,7 +20,7 @@ export function VariantBar({ km }: { km: any }) {
     .reduce((a, o) => a + Object.keys(o).length, 0);
   const nl = (s.newLayers[km.id] || []).length;
   const dirty = n || nl;
-  const { reset, parts } = buildChoices(s, km);
+  const choices = choicesBody(buildChoices(s, km));
   // Text typed into the key editor but not applied goes into the save, as Enter
   // would have put it there. Blank text, or what the key already holds, does not.
   const withKey = (): State => {
@@ -34,7 +34,7 @@ export function VariantBar({ km }: { km: any }) {
     return reducer(s, a);
   };
   const save = (over: string | null, typed: string, st = withKey()) =>
-    saveVariant(st, d, km, over, typed, reset, parts);
+    saveVariant(st, d, km, over, typed, choices);
 
   // Ctrl/Cmd+S: Overwrite on a variant, Save as… elsewhere. Not while a sheet
   // is open, since it may be one that saves on Enter, or not about saving.

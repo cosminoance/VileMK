@@ -21,6 +21,12 @@ import type { Importing } from "../lib/transfer";
 // part id. A part not in it falls back to `km.parts[].on`, which the server read
 // from the build list that builds this keymap now.
 //
+// `prep` holds a prepared module's choices per keymap id, once clicked: the
+// shield folder, the vendor entries ticked for it, and the vendor confs
+// changed from their defaults. Picking a folder drops the entry clicks, since
+// another folder offers other entries. Unclicked, `km.prep` has what the
+// variant's build.yaml has.
+//
 // `activeField` names the input the menu fills - the field's key, not the
 // element, so its value is read back out of the draft it belongs to. `null`
 // means nothing has been clicked yet, which `activeFieldOf()` resolves to the
@@ -29,6 +35,12 @@ import type { Importing } from "../lib/transfer";
 // `keyVal` is the key editor's live text. It is here rather than in the input
 // because the picker highlights against it.
 export interface Msg { text: string; bad?: boolean }
+
+export interface Prep {
+  folder?: string;
+  entries?: Record<string, boolean>;
+  confs?: Record<string, boolean>;
+}
 
 export interface State {
   /** The `/api/state` payload, `any` by decision (react-migration.md Phase 2). */
@@ -57,6 +69,7 @@ export interface State {
   newLayers: Record<string, { name: string }[]>;
   reset: Record<string, boolean>;
   parts: Record<string, Record<string, boolean>>;
+  prep: Record<string, Prep>;
   /** The build panel under the variant bar is open. */
   build: boolean;
 
@@ -88,7 +101,7 @@ export const initialState = (data: any): State => {
     layer: 0, layout: 0, base: "", nums: v.nums ?? true, hot: null,
     emode: null, drafts: {}, assign: {}, msg: null, dts: null,
     editing: null, picker: true, ptab: "keyboard",
-    newLayers: {}, reset: {}, parts: {}, build: false,
+    newLayers: {}, reset: {}, parts: {}, prep: {}, build: false,
     activeField: null, keyVal: "",
     imp: null,
   };
@@ -121,6 +134,9 @@ export type Action =
   | { t: "ptab"; tab: string }
   | { t: "reset"; kmId: string; on: boolean }
   | { t: "part"; kmId: string; id: string; on: boolean }
+  | { t: "prepFolder"; kmId: string; folder: string }
+  | { t: "prepEntry"; kmId: string; id: string; on: boolean }
+  | { t: "prepConf"; kmId: string; id: string; on: boolean }
   | { t: "build"; on: boolean }
   | { t: "field"; key: string | null }
   | { t: "keyVal"; v: string }
@@ -164,6 +180,19 @@ export function reducer(s: State, a: Action): State {
     case "part":
       return { ...s, parts: { ...s.parts,
                               [a.kmId]: { ...s.parts[a.kmId], [a.id]: a.on } } };
+    case "prepFolder":
+      return { ...s, prep: { ...s.prep, [a.kmId]: { ...s.prep[a.kmId], folder: a.folder,
+                                                    entries: {} } } };
+    case "prepEntry": {
+      const p = s.prep[a.kmId] || {};
+      return { ...s, prep: { ...s.prep,
+        [a.kmId]: { ...p, entries: { ...p.entries, [a.id]: a.on } } } };
+    }
+    case "prepConf": {
+      const p = s.prep[a.kmId] || {};
+      return { ...s, prep: { ...s.prep,
+        [a.kmId]: { ...p, confs: { ...p.confs, [a.id]: a.on } } } };
+    }
     case "build": return { ...s, build: a.on };
     case "field": return { ...s, activeField: a.key };
     case "keyVal": return { ...s, keyVal: a.v };
