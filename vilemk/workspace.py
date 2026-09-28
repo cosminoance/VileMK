@@ -126,6 +126,52 @@ def resolve(owner: str, repo: str, ref: str) -> str:
     return sha
 
 
+def _api_json(url: str, what: str):
+    try:
+        with _get(url, "application/vnd.github+json") as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise WorkspaceError(f"{what} does not exist on GitHub") from None
+        if exc.code in (403, 429):
+            raise WorkspaceError("GitHub's rate limit for unauthenticated requests "
+                                 "(60 an hour) is used up; try again later") from None
+        raise WorkspaceError(f"GitHub answered {exc.code} for {what}") from None
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise WorkspaceError(f"could not reach GitHub: {getattr(exc, 'reason', exc)}") \
+            from None
+
+
+LINE_TAG_RE = re.compile(r"^v(\d+)\.(\d+)$")
+RELEASE_TAG_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?$")
+
+
+def refs(url: str) -> dict:
+    """The refs worth offering for a repository: its release tags, newest
+    first, and its default branch. Two API calls.
+
+    Release lines (`v0.3`, which ZMK moves along its `v0.3.x` fixes) are
+    offered when the repository has any; otherwise its version tags.
+    -> {refs: [{ref, kind}]}, kind being latest, release or development.
+    """
+    owner, repo = parse_github(url)
+    what = f"{owner}/{repo}"
+    info = _api_json(f"https://api.github.com/repos/{owner}/{repo}", what)
+    tags = [t.get("name", "") for t in
+            _api_json(f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=100",
+                      what)]
+    lines = [t for t in tags if LINE_TAG_RE.match(t)]
+    picked = lines or [t for t in tags if RELEASE_TAG_RE.match(t)]
+    picked.sort(key=lambda t: tuple(int(n or 0) for n in RELEASE_TAG_RE.match(t).groups()),
+                reverse=True)
+    out = [{"ref": t, "kind": "latest" if i == 0 else "release"}
+           for i, t in enumerate(picked[:10])]
+    branch = info.get("default_branch") or ""
+    if branch:
+        out.append({"ref": branch, "kind": "development"})
+    return {"refs": out}
+
+
 def _wanted(rel: str, prefixes) -> bool:
     if prefixes is None:
         return True

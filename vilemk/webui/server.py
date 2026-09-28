@@ -34,6 +34,8 @@ Endpoints:
                                   its `// zmk-module:` line names
     POST   /api/import            restore its records, then write variants/<name>/
     POST   /api/zmk               fetch ZMK's board data at {url, ref} and pin it
+    GET    /api/zmk/refs?url=U    a repository's release tags and default branch,
+                                  for the settings sheet's branch or tag select
     GET    /api/keyboards         what can be added (catalog entries with a keymap),
                                   the controller boards a shield can sit on, and
                                   the modules in west.yml
@@ -181,6 +183,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": str(exc)})
             return self._send(200, {"files": files, "drives": flash.drives(),
                                     **firmware.firmware_state(name)})
+        if self.path == "/api/zmk/refs":
+            url = (parse_qs(query).get("url") or [""])[0] or workspace.ZMK_URL
+            try:
+                return self._send(200, workspace.refs(url))
+            except workspace.WorkspaceError as exc:
+                return self._send(400, {"error": str(exc)})
         if self.path == "/api/keyboards":
             kbs, boards = keyboards.offer(Args().zmk)
             return self._send(200, {"keyboards": kbs, "controllers": boards,
