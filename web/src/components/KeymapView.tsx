@@ -5,8 +5,8 @@ import { layersOf } from "../lib/layers";
 import { tabForBinding } from "../lib/cards";
 import { LIVE, draftOf, useStore } from "../state/store";
 import { Board } from "./Board";
-import { askText } from "./Confirm";
 import { KeyEditor } from "./KeyEditor";
+import { AddLayerButton } from "./LayerImport";
 import { Menu } from "./Menu";
 import { Panel } from "./Panels";
 import { Tables } from "./Tables";
@@ -37,14 +37,6 @@ export function KeymapView() {
   const baseBindings =
     baseLayer && baseLayer.bindings.length === (layer ? layer.bindings.length : 0)
       ? baseLayer.bindings : null;
-
-  const addLayer = async () => {
-    const n = allLayers.length;
-    const name = await askText({ title: "New layer", ok: "Add layer",
-      field: { value: `layer_${n}`, placeholder: "layer name" } });
-    if (!name) return;
-    d({ t: "addLayer", kmId: km.id, name, at: n });
-  };
 
   // While a combo is being drafted the board *is* the chord picker; every other
   // time, clicking a key opens that key's editor.
@@ -109,7 +101,7 @@ export function KeymapView() {
           </button>
         ))}
         {live && allLayers.length < 32 &&
-          <button className="ghost sm" onClick={addLayer}>+ layer</button>}
+          <AddLayerButton km={km} />}
       </div>
 
       {!layer || layer.reserved

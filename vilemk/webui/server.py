@@ -193,6 +193,8 @@ class Handler(BaseHTTPRequestHandler):
             for km in data["keymaps"]:
                 km["parts"] = _parts(km)
                 if km.get("kind") == "variant":
+                    km["reset"] = custom.has_reset(
+                        os.path.join(os.path.dirname(km["path"]), "build.yaml"))
                     try:
                         km["firmware"] = firmware.firmware_state(km["name"])
                     except (ValueError, OSError):
@@ -502,7 +504,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, {"wrote": _rel(path),
                                 "build": _rel(build_path),
                                 "folder": _rel(os.path.dirname(path)),
-                                "warnings": errors + notes,
+                                "warnings": _plain(errors + notes),
+                                "notices": _notices(notes),
                                 "custom": custom.load_everything()})
 
     # ------------------------------------------------------------------ zmk
@@ -682,7 +685,8 @@ class Handler(BaseHTTPRequestHandler):
             "folder": _rel(os.path.dirname(path)),
             "saved": [f"{k}/{r['name']}" for k, r, _w in plan],
             "renamed": [f"{k} {was} -> {now}" for k, was, now in renamed],
-            "warnings": notes + more + km.rep.warnings,
+            "warnings": _plain(notes + more + km.rep.warnings),
+            "notices": _notices(more),
             "errors": km.rep.errors + ([f"checks stopped: {stopped}"] if stopped else []),
             "custom": store})
 
@@ -754,8 +758,6 @@ def _board_module(board: str):
 
 
 POSITIONS_RE = re.compile(r"(?m)^// key positions \(.*\n(?://.*\n)*?// end key positions\n")
-
-
 def _with_positions(text: str, lay: dict) -> str:
     """`text` with a comment drawing `lay`'s key positions, under the header lines."""
     layout = keypos.Layout(lay["label"], lay.get("display") or "", lay.get("source") or "",
@@ -865,6 +867,16 @@ def _rel(path: str) -> str:
     """Paths go back to the page relative to the VileMK checkout, never absolute
     - the page prints them, and an absolute path is noise plus a small leak."""
     return os.path.relpath(path, custom.PROJECT_DIR) if path else ""
+
+
+def _plain(warnings: list) -> list:
+    """The warnings the page lists inline; a `custom.Notice` gets a dialog."""
+    return [w for w in warnings if not isinstance(w, custom.Notice)]
+
+
+def _notices(warnings: list) -> list:
+    return [{"title": w.title, "text": str(w)}
+            for w in warnings if isinstance(w, custom.Notice)]
 
 
 def _parts(km) -> list:

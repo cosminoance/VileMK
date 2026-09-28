@@ -1,9 +1,10 @@
 import { useState } from "react";
 
-import { openImport } from "../state/actions";
+import { openImport, selectKeymap } from "../state/actions";
 import { LIVE, useStore } from "../state/store";
 import { KeymapMenu } from "./KeymapMenu";
 import { KeyboardsButton } from "./Keyboards";
+import { RepoFooter } from "./RepoFooter";
 import { ImportButton } from "./Transfer";
 
 const KINDS: Record<string, string> = {
@@ -52,9 +53,10 @@ export function Sidebar() {
   return (<>
     <aside id="kblist" className={over ? "dropping" : ""} {...drop}>
       <input placeholder="filter keyboards…" autoComplete="off" value={s.filter}
-             onChange={(e) => d({ t: "filter", v: e.target.value })} />
+             onChange={(e) => d({ t: "filter", v: e.target.value })}
+             onKeyDown={(e) => { if (e.key === "Escape") d({ t: "filter", v: "" }); }} />
       {LIVE(s) && <><KeyboardsButton /><ImportButton /></>}
-      <div>
+      <div className="kblists">
         {groups.length
           ? groups.map((g) => (
               <div key={g.kind}>
@@ -66,7 +68,7 @@ export function Sidebar() {
                        className={"kbrow" + (k.child ? " child" : "")
                                   + (k.id === s.id ? " sel" : "")}>
                     <button className={k.id === s.id ? "sel" : ""}
-                            onClick={() => d({ t: "select", id: k.id })}>
+                            onClick={() => selectKeymap(s, d, k.id)}>
                       {k.name}<small title={k.path}>{k.note ? k.note + " · " : ""}{k.path}</small>
                     </button>
                     <KeymapMenu km={k} />
@@ -76,6 +78,7 @@ export function Sidebar() {
             ))
           : <div className="group">no matches</div>}
       </div>
+      <RepoFooter />
     </aside>
     {/* The handle sits on the panel's own border rather than in the header, so
         it reads as belonging to the panel. It is outside `aside` because the

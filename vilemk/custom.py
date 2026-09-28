@@ -1261,6 +1261,14 @@ def parts_for(keyboard: str, zmk_dir: str = ".zmk", build_path: str = ""):
             for slot, shields in vendor.items() for sh in shields]
 
 
+def has_reset(build_path: str):
+    """Whether a build list carries `settings_reset` entries, or None with no file."""
+    if not os.path.isfile(build_path):
+        return None
+    return any(RESET_SHIELD in e.shields
+               for e in keymap.parse_build_yaml(keymap.read_text(build_path)))
+
+
 def _add_flags(cmake_args: str, flags) -> str:
     """Append each flag whose symbol the args do not already set."""
     for f in flags:
@@ -1282,6 +1290,30 @@ def _entries_for(keyboard: str, entries):
                for n in names if n):
             out.append(e)
     return out
+
+
+def _named_entries(keyboard: str, entries):
+    """`_entries_for()` over entries that all carry an `artifact-name`, one per
+    board and shield set, with the name dropped: it names the vendor's firmware,
+    not the variant's."""
+    out, seen = [], set()
+    for e in _entries_for(keyboard, entries):
+        key = (e.board, tuple(e.shields))
+        if key in seen:
+            continue
+        seen.add(key)
+        e.props.pop("artifact-name", None)
+        out.append(e)
+    return out
+
+
+class Notice(str):
+    """A warning the page shows in a dialog of its own, under `title`."""
+
+    def __new__(cls, title: str, text: str):
+        self = super().__new__(cls, text)
+        self.title = title
+        return self
 
 
 def _reset_body(boards):
@@ -1370,14 +1402,29 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
         source = f"the project's own {own}"
     else:
         vendor = [e for e in keymap.vendor_build_entries(zmk_dir)
-                  if not e.get("snippet") and not e.get("artifact-name")
-                  and RESET_SHIELD not in e.get("shield", "")]
-        picked = _entries_for(keyboard, vendor)
+                  if RESET_SHIELD not in e.get("shield", "")]
+        picked = _entries_for(keyboard, [e for e in vendor if not e.get("snippet")
+                                         and not e.get("artifact-name")])
         if picked:
             source = "the vendor's build list in the ZMK cache"
             warnings.append(
                 f"{own or 'build.yaml'} has no entry for `{keyboard}`; the variant's "
                 "build.yaml was written from the vendor's build list instead")
+        else:
+            picked = _named_entries(keyboard, vendor)
+            if picked:
+                source = "the vendor's named build entries in the ZMK cache"
+                warnings.append(Notice(
+                    "Build entries from the vendor's own firmware",
+                    f"The vendor's build list names every entry for `{keyboard}` "
+                    "after one of its own firmware files (`artifact-name`), so "
+                    "VileMK took one entry per board and shield from it and dropped "
+                    "the names: "
+                    + ", ".join(" + ".join([e.board, *e.shields]) for e in picked)
+                    + ". Check them in the variant's build.yaml. A vendor that "
+                    "builds several keymaps or formats from one repo sometimes "
+                    "rearranges its files in its own CI first, and that build may "
+                    "fail here."))
 
     if not picked:
         warnings.append(

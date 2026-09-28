@@ -1,5 +1,5 @@
 /* Export buttons, the export dialog, the sidebar's import target, the
-   import dialog, the settings sheet, the keyboards sheet, the build sheet, the save-as sheet and the confirm sheet, which share the modal. */
+   import dialog, the layer import dialog, the settings sheet, the keyboards sheet, the build sheet, the save-as sheet and the confirm sheet, which share the modal. */
 aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
 .impbtn{display:block;width:100%;margin:0 0 10px;text-align:center}
 
@@ -94,3 +94,11 @@ aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
 .keyboards .fields .bar{margin:0}
 .keyboards .bar .kb.wide{width:min(320px,100%)}
 .kbpick .group:first-child{margin-top:4px}
+
+/* Layer from another keyboard: the variations scroll inside the sheet, like the
+   keyboards catalog, so the picked layer's board stays in view under them. */
+.layerimport .items{max-height:24vh;overflow:auto;border:1px solid var(--line);
+  border-radius:8px;padding:4px;margin-bottom:10px}
+.layerimport .bar .kb.wide{flex:1 1 240px}
+.layerimport .tabs button:disabled{opacity:.4;cursor:not-allowed}
+.lidrop{white-space:nowrap;margin-right:8px}

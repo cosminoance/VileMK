@@ -6,8 +6,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
-import { bindsStudioUnlock } from "../lib/keymaps";
-import { useStore, type State } from "../state/store";
+import { buildChoices } from "../lib/keymaps";
+import { useStore } from "../state/store";
 import { ask } from "./Confirm";
 import { FlashSheet, flashBlock } from "./Flash";
 import { Fold } from "./Fold";
@@ -31,16 +31,6 @@ type Job = {
   path?: string;
   docker?: { ok: boolean; reason: string };
 };
-
-/** What the variant's build.yaml gets on save: the reset entries, and which
- *  of the vendor's add-on parts this keyboard has. */
-export function buildChoices(s: State, km: any) {
-  const reset = s.reset === null ? bindsStudioUnlock(km) : s.reset;
-  const offered: any[] = km.parts || [];
-  const parts: Record<string, boolean> = Object.fromEntries(
-    offered.map((p) => [p.id, (s.parts[km.id] || {})[p.id] ?? p.on]));
-  return { reset, offered, parts };
-}
 
 export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
   const { s, d } = useStore();
@@ -75,7 +65,7 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
             the keys that stick are the ones carrying a generated behavior, so the
             board looks almost right. Default this on when the keymap binds
             `&studio_unlock`, since that is the keymap that can hit it. */}
-        <Toggle checked={reset} onChange={(on) => d({ t: "reset", on })}>
+        <Toggle checked={reset} onChange={(on) => d({ t: "reset", kmId: km.id, on })}>
           include reset
         </Toggle>
         <Help label="what include reset does">

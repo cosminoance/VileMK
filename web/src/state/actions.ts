@@ -121,8 +121,30 @@ export async function saveVariant(
         msg: { text: `wrote ${r.folder || r.wrote}`
                  + (r.build ? " (keymap + build.yaml)" : "")
                  + (r.warnings && r.warnings.length ? " - " + r.warnings.join("; ") : "") } });
+    await showNotices(r);
     return true;
   } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
+}
+
+// Warnings the server marks as `custom.Notice`, one dialog each.
+async function showNotices(r: { notices?: { title: string; text: string }[] }) {
+  for (const n of r.notices || []) await ask({ info: true, title: n.title, body: n.text });
+}
+
+// `assign` is filed by layer and position, not by keymap, so pending edits would
+// land on whichever keymap is selected next. Switching asks, and drops them.
+export async function selectKeymap(s: State, d: D, id: string) {
+  const n = Object.values(s.assign).reduce((a, o) => a + Object.keys(o).length, 0);
+  const nl = s.id ? (s.newLayers[s.id] || []).length : 0;
+  if (id !== s.id && s.id && (n || nl)) {
+    const what = [n && `${n} key change(s)`, nl && `${nl} new layer(s)`]
+      .filter(Boolean).join(" and ");
+    if (!await ask({ title: "Discard unsaved changes?",
+                     body: `${what} on this keymap are not saved. Switching drops them.`,
+                     ok: "Discard", danger: true })) return;
+    d({ t: "clearAssign", kmId: s.id });
+  }
+  d({ t: "select", id });
 }
 
 // Deleting is ours to offer only because `variants/` is ours to write: the
@@ -216,7 +238,9 @@ export async function runImport(s: State, d: D) {
     d({ t: "imported", data: fresh, store: fresh.custom || r.custom || s.store,
         id: created ? created.id : null,
         msg: { text: `imported into ${r.folder || r.wrote}` } });
+    await showNotices(r);
   } catch (e) {
     d({ t: "impPatch", patch: { busy: false, error: (e as Error).message } });
   }
 }
+

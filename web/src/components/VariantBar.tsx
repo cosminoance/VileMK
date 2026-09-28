@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { slugify } from "../lib/keymaps";
+import { buildChoices, choicesChanged, slugify } from "../lib/keymaps";
+import { layersOf } from "../lib/layers";
 import { deleteVariant, saveVariant } from "../state/actions";
-import { useStore } from "../state/store";
-import { BuildPanel, buildChoices } from "./Build";
+import { reducer, useStore, type Action, type State } from "../state/store";
+import { BuildPanel } from "./Build";
 import { Dropdown } from "./Dropdown";
 import { Modal } from "./Modal";
 import { Notice } from "./Notice";
@@ -20,8 +21,45 @@ export function VariantBar({ km }: { km: any }) {
   const nl = (s.newLayers[km.id] || []).length;
   const dirty = n || nl;
   const { reset, parts } = buildChoices(s, km);
-  const save = (over: string | null, typed: string) =>
-    saveVariant(s, d, km, over, typed, reset, parts);
+  // Text typed into the key editor but not applied goes into the save, as Enter
+  // would have put it there. Blank text, or what the key already holds, does not.
+  const withKey = (): State => {
+    if (s.editing === null) return s;
+    const v = s.keyVal.trim();
+    const cur = (s.assign[s.layer] || {})[s.editing]
+      ?? layersOf(km, s.newLayers[km.id], s.layout)[s.layer]?.bindings[s.editing];
+    if (!v || v === String(cur ?? "").trim()) return s;
+    const a: Action = { t: "assign", pos: s.editing, v, close: true, msg: null };
+    d(a);
+    return reducer(s, a);
+  };
+  const save = (over: string | null, typed: string, st = withKey()) =>
+    saveVariant(st, d, km, over, typed, reset, parts);
+
+  // Ctrl/Cmd+S: Overwrite on a variant, Save as… elsewhere. Not while a sheet
+  // is open, since it may be one that saves on Enter, or not about saving.
+  const saving = useRef(false);
+  const quick = useRef(() => {});
+  quick.current = async () => {
+    if (saving.current || document.querySelector(".modal")) return;
+    if (!own) return setAsking(true);
+    const st = withKey();
+    if (!Object.keys(st.assign).length && !nl && !choicesChanged(st, km))
+      return d({ t: "msg", msg: { text: "nothing to save" } });
+    saving.current = true;
+    await save(km.name, km.name, st);
+    saving.current = false;
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey
+          || e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      quick.current();
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
 
   return <>
     <div className="bar">
@@ -32,10 +70,11 @@ export function VariantBar({ km }: { km: any }) {
         </span>}
       {own
         ? <Dropdown label="Save" items={[
-            { label: <>Overwrite {km.name}</>, onPick: () => save(km.name, km.name) },
+            { label: <>Overwrite {km.name}</>, title: "Ctrl+S",
+              onPick: () => save(km.name, km.name) },
             { label: "Save as…", onPick: () => setAsking(true) },
           ]} />
-        : <button className="act" onClick={() => setAsking(true)}>Save as{"…"}</button>}
+        : <button className="act" title="Ctrl+S" onClick={() => setAsking(true)}>Save as{"…"}</button>}
       {!!dirty &&
         <button className="ghost"
                 onClick={() => d({ t: "clearAssign", kmId: km.id })}>Discard</button>}

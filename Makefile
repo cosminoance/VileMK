@@ -16,7 +16,8 @@
 #                   # and pin the commit (ARGS="--ref v0.3" to switch)
 #   make module ARGS=<name>
 #                   # fetch a keyboard module listed in config/west.yml
-#                   # into .zmk/modules/<name>/ and pin the commit
+#                   # into .zmk/modules/<name>/ and pin the commit, unless
+#                   # it breaks a variant (ARGS="<name> --overwrite <sha>")
 #   make module ARGS="add <github-url> --ref main"
 #                   # add a module that is not in west.yml yet
 #   make firmware ARGS=<variant>
@@ -77,7 +78,8 @@ zmk:
 	$(PY) -m vilemk.workspace update zmk $(ARGS)
 
 # Writes .zmk/modules/<name>/ and its pin in config/west.yml. A bare name updates
-# a module listed there; `add <url>` and `remove <name>` pass straight through.
+# a module listed there, after checking the variants still build against it;
+# `add <url>` and `remove <name>` pass straight through.
 module:
 	$(PY) -m vilemk.workspace $(if $(filter add remove,$(firstword $(ARGS))),,update) $(ARGS)
 

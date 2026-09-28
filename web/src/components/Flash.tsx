@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
+import { choicesChanged } from "../lib/keymaps";
 import type { State } from "../state/store";
 import { ask } from "./Confirm";
 import { Help } from "./Help";
@@ -30,6 +31,7 @@ export function flashBlock(s: State, km: any): string | null {
   const edits = (km.id === s.id ? Object.keys(s.assign).length : 0)
     + (s.newLayers[km.id] || []).length;
   if (edits) return "unsaved changes; save and build first";
+  if (choicesChanged(s, km)) return "build options changed; build again first";
   if (!fw.fresh) return "changed since the last build; build again first";
   return null;
 }
@@ -46,6 +48,7 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
   const [wait, setWait] = useState<string | null>(null);
   const [stuck, setStuck] = useState(false);
   const [flashed, setFlashed] = useState<string | null>(null);
+  const [many, setMany] = useState<Drive[]>([]);
   const until = useRef(0);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
@@ -54,6 +57,7 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
 
   const look = () => {
     setDrive(null);
+    setMany([]);
     setFlashed(null);
     until.current = Date.now() + LOOK_MS;
     setLeft(LOOK_MS / 1000);
@@ -71,11 +75,15 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
   useEffect(() => {
     if (!looking) return;
     const t = setInterval(async () => {
-      let found: Drive | undefined;
-      try { found = (await api("GET", q)).drives[0]; }
+      let found: Drive[] = [];
+      try { found = (await api("GET", q)).drives; }
       catch (e: any) { setErr(e.message); }
       if (!alive.current) return;
-      if (found) { setDrive(found); setLooking(false); return; }
+      // Both halves report the same Board-ID, so with two drives there is no
+      // telling which is which. Wait, without a time limit, for one to go.
+      setMany(found.length > 1 ? found : []);
+      if (found.length > 1) { until.current = Date.now() + LOOK_MS; return; }
+      if (found.length) { setDrive(found[0]); setLooking(false); return; }
       const ms = until.current - Date.now();
       setLeft(Math.max(0, Math.ceil(ms / 1000)));
       if (ms > 0) return;
@@ -94,12 +102,16 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
   useEffect(() => {
     if (!wait) return;
     const since = Date.now();
+    const path = drive?.path;
     const t = setInterval(async () => {
       let drives: Drive[] | undefined;
       try { drives = (await api("GET", q)).drives; }
       catch (e: any) { setErr(e.message); }
       if (!alive.current || !drives) return;
-      if (drives.length) { setStuck(Date.now() - since > STUCK_MS); return; }
+      if (drives.some((v) => v.path === path)) {
+        setStuck(Date.now() - since > STUCK_MS);
+        return;
+      }
       setWait(null);
       setStuck(false);
       setDrive(null);
@@ -164,13 +176,16 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
         </ol>
 
         <div className={"msg " + (wait ? (stuck ? "bad" : "")
-            : drive || flashed ? "ok" : looking ? "" : "bad")}>
+            : drive || flashed ? "ok" : looking && !many.length ? "" : "bad")}>
           {wait ? (stuck
               ? <>The drive is still there, so the board did not take{" "}
                   <code>{wait}</code>. Check it is the file for this half.</>
               : <>Copied <code>{wait}</code>. Waiting for the keyboard to restart…</>)
             : flashed ? <>Flashed <code>{flashed}</code>.</>
             : drive ? <>Found {drive.board || "a UF2 bootloader"} at <code>{drive.path}</code>.</>
+            : many.length ? <>{many.length} keyboards are in their bootloader
+                ({many.map((v, i) => <span key={v.path}>{i ? ", " : ""}<code>{v.path}</code></span>)}).
+                Unplug all but the one you are flashing.</>
             : looking ? <>Looking for the keyboard over USB… {left}s</>
             : <>No keyboard found.</>}
           {!drive && !looking && !wait &&

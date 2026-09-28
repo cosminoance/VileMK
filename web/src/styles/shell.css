@@ -12,7 +12,8 @@ header .brand img{display:block;height:20px;width:auto}
 header .meta{color:var(--muted);font-size:12px}
 .wrap{display:flex;align-items:flex-start}
 aside{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel);
-  height:calc(100vh - 42px);overflow:auto;position:sticky;top:42px;padding:10px}
+  height:calc(100vh - 42px);overflow:auto;position:sticky;top:42px;padding:10px;
+  display:flex;flex-direction:column}
 .wrap.closed aside{display:none}
 /* The collapse handle, riding the sidebar's right border: a tab of the panel's
    own surface, overlapping the border by a pixel so the two read as one piece.
@@ -37,6 +38,19 @@ aside button:hover{background:var(--bg)}
 aside button.sel{background:var(--accent-soft);color:var(--accent);font-weight:600}
 aside button small{display:block;color:var(--muted);font-weight:400;font-size:11px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A flex column does not collapse margins, so the first group label would sit
+   22px under the buttons instead of 12px. */
+aside .kblists > .group:first-child,
+aside .kblists > div:first-child > .group:first-child{margin-top:2px}
+aside .kblists{margin-bottom:12px}
+/* Pinned to the panel's foot while the list is short, after it once it scrolls. */
+.repofoot{margin-top:auto;padding-top:10px;border-top:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+  font-size:11px;line-height:1}
+.repofoot a{display:inline-flex;align-items:center;gap:6px;color:var(--muted);
+  text-decoration:none}
+.repofoot a:hover,.repofoot a:focus-visible{color:var(--accent);text-decoration:underline}
+.repofoot .icon{flex:none}
 /* Centred column. `min-width:0` keeps a wide child (the board, a `<pre>`) from
    forcing the flex item wider than the viewport instead of scrolling itself. */
 main{flex:1;min-width:0;width:100%;max-width:1200px;margin:0 auto;

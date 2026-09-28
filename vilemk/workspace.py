@@ -6,6 +6,7 @@ commit), so only GitHub URLs work.
 
     python3 -m vilemk.workspace show
     python3 -m vilemk.workspace update zmk [--url URL] [--ref REF]
+    python3 -m vilemk.workspace update <module> [--overwrite SHA]
     python3 -m vilemk.workspace catalog
     python3 -m vilemk.workspace add <github-url> [--ref REF] [--name NAME]
     python3 -m vilemk.workspace remove <name>
@@ -374,15 +375,34 @@ def installed_names(zmk_dir: str = ZMK_DIR) -> set:
     plus every directory under a `boards/` tree (utility shields like
     `settings_reset` have no `*.zmk.yml`)."""
     names = {n for e in catalog(zmk_dir) for n in [e["id"], *e.get("siblings", [])]}
+    for tree in _board_trees(zmk_dir):
+        for _dirpath, dirs, _files in os.walk(tree):
+            names.update(d for d in dirs if not d.startswith("."))
+    return names | set(shield_dirs(zmk_dir))
+
+
+def _board_trees(zmk_dir: str) -> list:
     trees = [os.path.join(zmk_dir, "zmk", "app", "boards")]
     mods = os.path.join(zmk_dir, "modules")
     if os.path.isdir(mods):
-        trees += [os.path.join(mods, m, "boards") for m in os.listdir(mods)
+        trees += [os.path.join(mods, m, "boards") for m in sorted(os.listdir(mods))
                   if not m.startswith(".")]
-    for tree in trees:
-        for _dirpath, dirs, _files in os.walk(tree):
-            names.update(d for d in dirs if not d.startswith("."))
-    return names
+    return trees
+
+
+def shield_dirs(zmk_dir: str = ZMK_DIR) -> dict:
+    """{shield: [dir, ...]}, found as Zephyr finds them: `<shield>.overlay`
+    in `boards/shields/<dir>/`. More than one dir is a shield Zephyr sees twice."""
+    out = {}
+    for tree in _board_trees(zmk_dir):
+        for dirpath, dirs, files in os.walk(tree):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            if os.path.basename(os.path.dirname(dirpath)) != "shields":
+                continue
+            for fn in files:
+                if fn.endswith(".overlay"):
+                    out.setdefault(fn[:-len(".overlay")], []).append(dirpath)
+    return out
 
 
 def scan(source: str, root: str) -> list:
@@ -659,6 +679,9 @@ def main() -> int:
     up.add_argument("name", help="`zmk` or a module name from west.yml")
     up.add_argument("--url", default="", help="zmk only: switch repository")
     up.add_argument("--ref", default="", help="zmk only: switch branch or tag")
+    up.add_argument("--overwrite", default="", metavar="SHA",
+                    help="modules only: install this commit without checking the "
+                         "variants (the one a failed check named)")
     sub.add_parser("catalog", help="every *.zmk.yml in .zmk/")
     ad = sub.add_parser("add", help="fetch a module from GitHub and add it to west.yml")
     ad.add_argument("url")
@@ -678,11 +701,17 @@ def main() -> int:
                 print(f"{i['name']:<24} {pin:<24} ref={i['ref'] or '-'}  {i['url']}")
         elif args.cmd == "update":
             if args.name == "zmk":
+                if args.overwrite:
+                    ap.error("--overwrite only applies to modules")
                 r = install_zmk(args.url, args.ref)
             elif args.url or args.ref:
                 ap.error("--url and --ref only apply to zmk")
             else:
-                r = install_module(args.name)
+                # Same check as the app's Update. Imported here: keyboards imports us.
+                from . import keyboards
+                r = install_module(
+                    args.name, sha=args.overwrite,
+                    check=None if args.overwrite else keyboards.update_check(args.name))
             was = r["was"][:12] if SHA_RE.match(r["was"]) else r["was"] or "nothing"
             print(f"{r['name']}: {r['ref']} -> {r['revision'][:12]} "
                   f"(was {was}), {r['files']} files")
@@ -696,6 +725,14 @@ def main() -> int:
             for e in catalog():
                 print(f"{e['source']:<20} {e['type']:<12} {e['id']:<28}"
                       f"{' keymap' if e['keymap'] else ''}")
+    except CheckFailed as exc:
+        print(f"{args.name}: not updated, the new version breaks a variant:",
+              file=sys.stderr)
+        for p in exc.problems:
+            print(f"  {p}", file=sys.stderr)
+        print(f"to install it anyway: make module ARGS=\"{args.name} "
+              f"--overwrite {exc.sha}\"", file=sys.stderr)
+        return 1
     except WorkspaceError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

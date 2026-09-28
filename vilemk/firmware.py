@@ -199,7 +199,29 @@ def targets(name: str, yaml_text: str | None = None,
                       if n not in have})
     if missing:
         raise NotInstalled(missing)
+    dirs = workspace.shield_dirs(zmk_dir)
+    twice = sorted({s for t in out for s in t["shield"].split() if len(dirs.get(s, [])) > 1})
+    if twice:
+        raise BuildError(_twice({s: dirs[s] for s in twice}, zmk_dir))
     return out
+
+
+def _twice(dirs: dict, zmk_dir: str) -> str:
+    """Why a build with shields Zephyr would find twice cannot run, and the fix."""
+    mods = os.path.join(zmk_dir, "modules")
+    one_module = False
+    lines = []
+    for shield, where in dirs.items():
+        owners = {os.path.relpath(d, mods).split(os.sep)[0] for d in where}
+        one_module |= len(owners) < len(where)
+        lines.append(f"{shield} is in " + " and ".join(os.path.relpath(d, zmk_dir)
+                                                       for d in where))
+    fix = ("A module defines the same shield in two folders, so the build needs a "
+           "fork of it with one folder deleted. Deleting it under .zmk/ does not "
+           "reach the build, which fetches the module from GitHub."
+           if one_module else
+           "Remove all but one of those modules in Add a keyboard.")
+    return "Zephyr would find a shield twice: " + "; ".join(lines) + ". " + fix
 
 
 def firmware_dir(name: str) -> str:
