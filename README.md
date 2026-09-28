@@ -68,11 +68,15 @@ only knows that the vendor's build fetches them, not which ones your keyboard
 uses. You can fetch them here, or leave them for later. The list is gone
 once the dialog closes.
 
+<img src=".github/images/add-drivers.png" width="600" alt="The keyboards sheet after fetching Charybdis_2: three badjeff drivers listed under Drivers Charybdis_2 uses, all unticked, each with a branch select, and a Fetch ticked button">
+
 Which ones a build needs shows up when you build a variant. If the modules the
 variant builds from fetch drivers that are still missing, **Build** lists them
 in **Add the drivers first**, all ticked, before it starts. **Fetch and build**
 adds the ticked ones and builds; **Build without** builds as is, for a driver
 the keyboard does not use. See [Drivers and other dependencies](TROUBLESHOOTING.md#drivers-and-other-dependencies).
+
+<img src=".github/images/build-drivers.png" width="600" alt="The Add the drivers first dialog before a Charybdis build: the three badjeff drivers ticked, zmk-pmw3610-driver at zmk-0.3, with Cancel, Build without and Fetch and build">
 
 ### 5. Make a variant
 
