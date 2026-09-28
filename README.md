@@ -18,7 +18,35 @@ locally.
 
 <img src=".github/images/app-overview.png" width="800" alt="The app: the sidebar with saved variations and vendor defaults, the Build panel open above an Eyelash Sofle keymap, and the tab menu under the board">
 
-## Build your own firmware
+## Contents
+
+- [Build and flash](#build-and-flash)
+  - [Requirements](#1-requirements)
+  - [Fetch ZMK](#2-fetch-zmk)
+  - [Start the app](#3-start-the-app)
+  - [Add your keyboard](#4-add-your-keyboard)
+  - [Make a variant](#5-make-a-variant)
+  - [Build](#6-build)
+  - [Flash](#7-flash)
+  - [Building firmware in detail](#building-firmware-in-detail)
+- [Keymapping](#keymapping)
+  - [Behaviours: every tab in the app](#behaviours-every-tab-in-the-app)
+    - [Keyboard](KEYMAP.md#keyboard): plain keycodes
+    - [Media & system](KEYMAP.md#media--system): media, mouse, Bluetooth, lighting and power keys
+    - [VileDance](KEYMAP.md#viledance-vial-style-tap-dances): tap dance, tap/hold/double-tap on one key
+    - [Macros](KEYMAP.md#macros): a sequence of steps played from one key
+    - [Modifiers](KEYMAP.md#modifiers): modifier chains such as ctrl+shift+F10
+    - [Layers](KEYMAP.md#layers): hold, layer-tap, sticky, toggle and switch-to
+    - [Combos](KEYMAP.md#combos-and-conditional-layers): several keys pressed together fire a binding
+    - [Conditional layers](KEYMAP.md#combos-and-conditional-layers): two layers held together turn on a third
+  - [Saving](#saving)
+  - [Sharing a layout](#sharing-a-layout)
+- [The keyboard list](#the-keyboard-list)
+  - [Keyboard modules](#keyboard-modules)
+- [make](#make)
+- [Troubleshooting](TROUBLESHOOTING.md)
+
+## Build and flash
 
 From a fresh clone to a flashed keyboard. Each step is covered in more detail
 further down.
@@ -154,59 +182,93 @@ board's own tool.
 > files to their halves, then the firmware, then pair Bluetooth again: the
 > reset clears the Bluetooth pairings too.
 
-## The keyboard list
+### Building firmware in detail
 
-The sidebar has two groups.
+**Build firmware** compiles every half of the variant, plus the settings reset
+files if **include reset** is ticked. The firmware folder is replaced only when
+everything built; a failed or cancelled build leaves the previous files. A
+variant whose keyboard is not installed (its module was removed, or the keymap
+came from someone else) is refused before Docker starts, with a message naming
+the missing board.
 
-**Saved variations** are your keymaps. They are the only ones you can
-overwrite and build.
-
-**Vendor defaults** are the keymaps that come with a keyboard. They are for
-comparing against (**compare with…**) and for starting a new variation.
-
-Some vendors ship two keymaps for one keyboard, so the keyboard is listed
-twice, each marked:
-
-- **board default** is the keymap ZMK falls back to when a build names none.
-- **vendor's firmware** is the keymap the vendor's released firmware is built
-  from. It can differ from the board default. The Eyelash Sofle's has a fourth
-  layer, left empty as a spare. It is listed one step in, under the board
-  default.
-
-The **⋮** button beside each row has **Export keymap**, **Export as picture**,
-and **Delete**. Delete on a variation deletes it and its built firmware. On a
-vendor default it removes the keyboard from the project, and the keyboard's
-module with it. That is refused while variations use the keyboard, and the
-dialog names them; delete those first.
-
-### Keyboard modules
-
-**Add a keyboard** also lists your modules. **Update** fetches the latest
-commit of the module's branch or tag and checks your variations against it
-before replacing anything. If one would break (a key removed from the layout, a
-board renamed), the module is left as it was and the dialog lists what would
-break, with **Overwrite** to install it anyway. **Remove** is refused while a
-variation still uses one of the module's keyboards. **Rename** changes only the
-name the app shows.
-
-A module has to be a clean ZMK module: a `zephyr/module.yml` and the keyboard's
-files under `boards/`, laid out as ZMK expects, with no custom CI rearranging
-them. Many keyboard repositories on GitHub are personal configs that only build
-through their owner's workflow. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) says how
-to tell them apart, what each build error means, and how to fork a repository
-into shape.
-
-From the command line:
+The build runs in `zmkfirmware/zmk-build-arm:stable`, the image ZMK's own build
+workflow uses. The ZMK and Zephyr sources it fetches on the first build are
+kept in a Docker volume, `vilemk-zmk`, and reused by later builds. To free the
+space:
 
 ```bash
-make module ARGS="add <github-url> --ref main"
+docker volume rm vilemk-zmk
 ```
 
-```bash
-make module ARGS=<name>
+The next build fetches them again.
+
+#### Repositories built by their maker's own CI
+
+Some keyboard repositories only build through their maker's GitHub workflow,
+which deletes or copies files first. VileMK recognises the usual steps and
+builds from a prepared copy under `.zmk/stage/`, leaving `.zmk/modules/` as
+fetched. Where the repository offers more than one way to build, you pick:
+
+- **folder**: shown in the Build panel when the repository keeps the keyboard
+  in several folders (for example Bluetooth and dongle). Build stays off until
+  one is picked.
+- **builds**: the maker's own build entries, to tick. Build stays off when
+  none is ticked, or when one half is ticked twice.
+- **vendor settings**: in the build sheet, the maker's `config/*.conf` files,
+  ticked the way the maker's build applies them.
+
+The drivers such a repository pulls in are listed after fetching it, in the
+keyboards sheet, and again by **Build** for any still missing (see step 4). [TROUBLESHOOTING.md](TROUBLESHOOTING.md#repositories-vilemk-prepares)
+has the details and a Charybdis example.
+
+#### Parts the vendor lists
+
+Most keyboards are more than a board. A screen, an encoder or an add-on module
+is a separate part the build has to be told about, on the half it is plugged
+into. The vendor writes one build list for every version they sell, with a
+screen and without, so it cannot say which one is on your desk. That is what
+the Build panel's **has** boxes are for.
+
+An unticked screen switches the display off for that half, because a vendor
+building for the version with a screen often turns the display on for
+everyone, and the build then fails looking for hardware that is not there. To
+switch a feature off for a half yourself, put the setting in that half's
+`.conf` file in `config/`, named after the board (for an Eyelash Sofle's left
+half, `config/eyelash_sofle_left.conf`):
+
+```
+CONFIG_ZMK_DISPLAY=n
 ```
 
-## Designing a keymap: every tab in the app
+It is added on top of the vendor's settings, and nothing VileMK fetches ever
+overwrites it.
+
+`make check` compares a variant's build against the vendor's list and prints
+what is missing, such as a part the vendor builds that your variant leaves out
+with nothing switching the matching feature off. It never changes anything. It
+cannot catch a part the vendor never listed, or a keyboard with no vendor
+module at all, and says so when it has nothing to compare against.
+
+#### A worked example: Eyelash Sofle
+
+The Eyelash Sofle comes from the `zmk-eyelash-sofle` module, and after adding
+it the sidebar shows its keymaps under **Vendor defaults**. In the app you
+design some VileDances and combos, bind them, and **Save as…**
+`eyelash_sofle_colemak`.
+
+The vendor lists `nice_view` on the left half and `nice_view_custom` on the
+right, so the Build panel shows both under **has**. This keyboard has no
+screens, so both stay unticked, and the left half gets its display switched
+off.
+
+**Build firmware** then writes `eyelash_sofle_left-zmk.uf2` and
+`eyelash_sofle_right-zmk.uf2`. Flash the left half with the left file and the
+right half with the right one. If the keyboard has been used with ZMK Studio,
+read the warning under [step 7](#7-flash) first.
+
+## Keymapping
+
+### Behaviours: every tab in the app
 
 Under the board is a menu of eight tabs: **Keyboard**, **Media & system**,
 **VileDance**, **Macros**, **Modifiers**, **Layers**, **Combos** and
@@ -260,7 +322,7 @@ keymap. Nothing reaches a keymap until you save a variant. Only the generated
 behaviors your keys, VileDances and combos actually reference are written into
 it; anything designed but never bound stays out.
 
-## Sharing a layout
+### Sharing a layout
 
 Sharing means sharing the `.keymap`. **Export keymap** in a row's **⋮** menu
 works for variations and vendor defaults. It offers **Save as…** (pick where to
@@ -282,89 +344,57 @@ overwritten. What it writes is a new variant, and it runs the same checks
 **Export as picture**, in the same menu, has **Copy image**, **Save PNG** and
 **Save SVG**, for pasting a layout into a chat.
 
-## Building firmware in detail
+## The keyboard list
 
-**Build firmware** compiles every half of the variant, plus the settings reset
-files if **include reset** is ticked. The firmware folder is replaced only when
-everything built; a failed or cancelled build leaves the previous files. A
-variant whose keyboard is not installed (its module was removed, or the keymap
-came from someone else) is refused before Docker starts, with a message naming
-the missing board.
+The sidebar has two groups.
 
-The build runs in `zmkfirmware/zmk-build-arm:stable`, the image ZMK's own build
-workflow uses. The ZMK and Zephyr sources it fetches on the first build are
-kept in a Docker volume, `vilemk-zmk`, and reused by later builds. To free the
-space:
+**Saved variations** are your keymaps. They are the only ones you can
+overwrite and build.
+
+**Vendor defaults** are the keymaps that come with a keyboard. They are for
+comparing against (**compare with…**) and for starting a new variation.
+
+Some vendors ship two keymaps for one keyboard, so the keyboard is listed
+twice, each marked:
+
+- **board default** is the keymap ZMK falls back to when a build names none.
+- **vendor's firmware** is the keymap the vendor's released firmware is built
+  from. It can differ from the board default. The Eyelash Sofle's has a fourth
+  layer, left empty as a spare. It is listed one step in, under the board
+  default.
+
+The **⋮** button beside each row has **Export keymap**, **Export as picture**,
+and **Delete**. Delete on a variation deletes it and its built firmware. On a
+vendor default it removes the keyboard from the project, and the keyboard's
+module with it. That is refused while variations use the keyboard, and the
+dialog names them; delete those first.
+
+### Keyboard modules
+
+**Add a keyboard** also lists your modules. **Update** fetches the latest
+commit of the module's branch or tag and checks your variations against it
+before replacing anything. If one would break (a key removed from the layout, a
+board renamed), the module is left as it was and the dialog lists what would
+break, with **Overwrite** to install it anyway. **Remove** is refused while a
+variation still uses one of the module's keyboards. **Rename** changes only the
+name the app shows.
+
+A module has to be a clean ZMK module: a `zephyr/module.yml` and the keyboard's
+files under `boards/`, laid out as ZMK expects, with no custom CI rearranging
+them. Many keyboard repositories on GitHub are personal configs that only build
+through their owner's workflow. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) says how
+to tell them apart, what each build error means, and how to fork a repository
+into shape.
+
+From the command line:
 
 ```bash
-docker volume rm vilemk-zmk
+make module ARGS="add <github-url> --ref main"
 ```
 
-The next build fetches them again.
-
-### Repositories built by their maker's own CI
-
-Some keyboard repositories only build through their maker's GitHub workflow,
-which deletes or copies files first. VileMK recognises the usual steps and
-builds from a prepared copy under `.zmk/stage/`, leaving `.zmk/modules/` as
-fetched. Where the repository offers more than one way to build, you pick:
-
-- **folder**: shown in the Build panel when the repository keeps the keyboard
-  in several folders (for example Bluetooth and dongle). Build stays off until
-  one is picked.
-- **builds**: the maker's own build entries, to tick. Build stays off when
-  none is ticked, or when one half is ticked twice.
-- **vendor settings**: in the build sheet, the maker's `config/*.conf` files,
-  ticked the way the maker's build applies them.
-
-The drivers such a repository pulls in are listed after fetching it, in the
-keyboards sheet, and again by **Build** for any still missing (see step 4). [TROUBLESHOOTING.md](TROUBLESHOOTING.md#repositories-vilemk-prepares)
-has the details and a Charybdis example.
-
-### Parts the vendor lists
-
-Most keyboards are more than a board. A screen, an encoder or an add-on module
-is a separate part the build has to be told about, on the half it is plugged
-into. The vendor writes one build list for every version they sell, with a
-screen and without, so it cannot say which one is on your desk. That is what
-the Build panel's **has** boxes are for.
-
-An unticked screen switches the display off for that half, because a vendor
-building for the version with a screen often turns the display on for
-everyone, and the build then fails looking for hardware that is not there. To
-switch a feature off for a half yourself, put the setting in that half's
-`.conf` file in `config/`, named after the board (for an Eyelash Sofle's left
-half, `config/eyelash_sofle_left.conf`):
-
+```bash
+make module ARGS=<name>
 ```
-CONFIG_ZMK_DISPLAY=n
-```
-
-It is added on top of the vendor's settings, and nothing VileMK fetches ever
-overwrites it.
-
-`make check` compares a variant's build against the vendor's list and prints
-what is missing, such as a part the vendor builds that your variant leaves out
-with nothing switching the matching feature off. It never changes anything. It
-cannot catch a part the vendor never listed, or a keyboard with no vendor
-module at all, and says so when it has nothing to compare against.
-
-### A worked example: Eyelash Sofle
-
-The Eyelash Sofle comes from the `zmk-eyelash-sofle` module, and after adding
-it the sidebar shows its keymaps under **Vendor defaults**. In the app you
-design some VileDances and combos, bind them, and **Save as…**
-`eyelash_sofle_colemak`.
-
-The vendor lists `nice_view` on the left half and `nice_view_custom` on the
-right, so the Build panel shows both under **has**. This keyboard has no
-screens, so both stay unticked, and the left half gets its display switched
-off.
-
-**Build firmware** then writes `eyelash_sofle_left-zmk.uf2` and
-`eyelash_sofle_right-zmk.uf2`. Flash the left half with the left file and the
-right half with the right one. If the keyboard has been used with ZMK Studio,
-read the warning under [step 7](#7-flash) first.
 
 ## make
 
@@ -390,3 +420,9 @@ make -C path/to/VileMK
 
 Or run `make install` once and use the `vilemk-*` commands (`vilemk-design`,
 `vilemk-check`, `vilemk-build` and the rest) from any directory.
+
+## Troubleshooting
+
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md) covers what a keyboard module needs,
+the repositories VileMK prepares before building, each build error and what it
+means, and missing drivers.
