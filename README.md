@@ -70,13 +70,7 @@ once the dialog closes.
 
 <img src=".github/images/add-drivers.png" width="600" alt="The keyboards sheet after fetching Charybdis_2: three badjeff drivers listed under Drivers Charybdis_2 uses, all unticked, each with a branch select, and a Fetch ticked button">
 
-Which ones a build needs shows up when you build a variant. If the modules the
-variant builds from fetch drivers that are still missing, **Build** lists them
-in **Add the drivers first**, all ticked, before it starts. **Fetch and build**
-adds the ticked ones and builds; **Build without** builds as is, for a driver
-the keyboard does not use. See [Drivers and other dependencies](TROUBLESHOOTING.md#drivers-and-other-dependencies).
-
-<img src=".github/images/build-drivers.png" width="600" alt="The Add the drivers first dialog before a Charybdis build: the three badjeff drivers ticked, zmk-pmw3610-driver at zmk-0.3, with Cancel, Build without and Fetch and build">
+Which ones a build needs shows up when you build a variant (step 6).
 
 ### 5. Make a variant
 
@@ -112,6 +106,14 @@ variant on screen:
 **Build firmware** uses those choices even if you haven't saved, and the
 variant remembers them. The build log streams into the dialog, and the build
 can be cancelled.
+
+If the modules the variant builds from fetch drivers this project does not
+have yet, **Build** lists them in **Add the drivers first**, all ticked, before
+it starts. **Fetch and build** adds the ticked ones and builds; **Build
+without** builds as is, for a driver the keyboard does not use. See
+[Drivers and other dependencies](TROUBLESHOOTING.md#drivers-and-other-dependencies).
+
+<img src=".github/images/build-drivers.png" width="600" alt="The Add the drivers first dialog before a Charybdis build: the three badjeff drivers ticked, zmk-pmw3610-driver at zmk-0.3, with Cancel, Build without and Fetch and build">
 
 The first build pulls ZMK's build image (about 3 GB) and fetches ZMK, Zephyr
 and the hardware libraries. That takes several minutes. A later build of a
