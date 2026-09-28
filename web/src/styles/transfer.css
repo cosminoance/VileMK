@@ -64,6 +64,7 @@ aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
 .settings .fields,.keyboards .fields{display:grid;grid-template-columns:max-content 1fr;gap:8px 12px;
   align-items:center;font-size:12px;color:var(--muted);margin:12px 0}
 .settings .fields .kb.wide,.keyboards .fields .kb.wide{width:100%}
+.settings .fields .note{line-height:1.45}
 
 /* Build: the log fills most of the sheet and follows the newest line. */
 .build pre.log{max-height:50vh;white-space:pre-wrap;word-break:break-all}
