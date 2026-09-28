@@ -6,11 +6,11 @@ import { tabForBinding } from "../lib/cards";
 import { LIVE, draftOf, useStore } from "../state/store";
 import { Board } from "./Board";
 import { KeyEditor } from "./KeyEditor";
+import { AddLayerButton } from "./LayerImport";
 import { Menu } from "./Menu";
 import { Panel } from "./Panels";
 import { Tables } from "./Tables";
 import { Toggle } from "./Toggle";
-import { ExportBar } from "./Transfer";
 import { VariantBar } from "./VariantBar";
 
 export function KeymapView() {
@@ -37,13 +37,6 @@ export function KeymapView() {
   const baseBindings =
     baseLayer && baseLayer.bindings.length === (layer ? layer.bindings.length : 0)
       ? baseLayer.bindings : null;
-
-  const addLayer = () => {
-    const n = allLayers.length;
-    const name = (prompt("Layer name", `layer_${n}`) || "").trim();
-    if (!name) return;
-    d({ t: "addLayer", kmId: km.id, name, at: n });
-  };
 
   // While a combo is being drafted the board *is* the chord picker; every other
   // time, clicking a key opens that key's editor.
@@ -81,16 +74,12 @@ export function KeymapView() {
           : <span className="path">
               {lay.display || lay.label} &middot; {lay.count} keys
             </span>}
-        <select value={s.base} onChange={(e) => d({ t: "base", id: e.target.value })}>
+        <select className="grow" value={s.base} onChange={(e) => d({ t: "base", id: e.target.value })}>
           <option value="">compare with… (off)</option>
           {s.data.keymaps.filter((k: any) => k.id !== km.id).map((k: any) => (
             <option key={k.id} value={k.id}>{k.kind}: {k.path}</option>
           ))}
         </select>
-        <Toggle checked={s.nums} onChange={(on) => d({ t: "nums", on })}>
-          key positions
-        </Toggle>
-        <ExportBar km={km} />
       </div>
 
       {live && <VariantBar key={km.id} km={km} />}
@@ -112,7 +101,7 @@ export function KeymapView() {
           </button>
         ))}
         {live && allLayers.length < 32 &&
-          <button className="ghost sm" onClick={addLayer}>+ layer</button>}
+          <AddLayerButton km={km} />}
       </div>
 
       {!layer || layer.reserved
@@ -127,6 +116,11 @@ export function KeymapView() {
                 drawn on a plain grid, but the numbers are still the real key
                 positions.
               </div>}
+            <div className="boardopts">
+              <Toggle checked={s.nums} onChange={(on) => d({ t: "nums", on })}>
+                key positions
+              </Toggle>
+            </div>
             <Board km={km} lay={lay} bindings={layer.bindings}
                    baseBindings={baseBindings} assign={s.assign[li] || {}}
                    nums={s.nums} hot={s.hot} sel={sel} editing={s.editing}

@@ -2,617 +2,345 @@
   <img src=".github/images/logo-banner.png" alt="VileMK" width="480">
 </p>
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=jn9MJbdGJI8">
-    <img src="https://i.ytimg.com/vi/jn9MJbdGJI8/maxresdefault.jpg" alt="VileMK - local zmk visual remapper" width="480"><br>
-    <img src="https://img.shields.io/badge/-Watch%20on%20YouTube-red?logo=youtube&logoColor=white&style=for-the-badge" alt="Watch on YouTube">
-  </a>
-</p>
 
-Tooling for authoring ZMK keymaps by hand, covering the things ZMK Studio
-can't express: combos, macros, VileDances (Vial-style tap/hold/double-tap
-dances), hold-taps and home-row mods, mod-morphs, conditional layers.
-
-Rotary encoders are the exception. Their bindings are validated and
-documented, but not yet editable in the app; see
-[Designing a keymap](#designing-a-keymap-every-tab-in-the-app) below.
+VileMK builds ZMK firmware for your keyboard on your own machine, from a keymap
+you edit in a local web app. The keymap can use the things ZMK Studio can't
+express: combos, macros, VileDances (Vial-style tap/hold/double-tap dances),
+hold-taps and home-row mods, mod-morphs, conditional layers. The build runs in
+ZMK's own build container under Docker and produces the `.uf2` files you
+flash.
 
 The name is a nod to [Vial](https://get.vial.today/), the graphical keymap
 editor from the QMK world that inspired this project. Vial is a potion bottle;
-VileMK is vile, as in ruthless. There is no live USB protocol. You write
-devicetree and validate it locally before it reaches CI.
+VileMK is vile, as in ruthless. There is no live USB protocol. You edit the
+keymap in the app, it is validated locally, and the firmware is compiled
+locally.
 
-This repo holds only the tools. The firmware sources live in the config repo
-created by the [`zmk` CLI](https://zmk.dev/docs/zmk-cli), and every tool here
-finds that repo on its own:
+<img src=".github/images/app-overview.png" width="800" alt="The app: the sidebar with saved variations and vendor defaults, the Build panel open above an Eyelash Sofle keymap, and the tab menu under the board">
 
-```bash
-zmk config user.home                        # where the CLI keeps it
-zmk config user.home /path/to/zmk-config    # point the tools somewhere else
-```
+## Build your own firmware
 
-To override that for one run, pass `--repo PATH` or set `$ZMK_CONFIG`. Every
-tool prints the repo it picked as its first line.
+From a fresh clone to a flashed keyboard. Each step is covered in more detail
+further down.
 
-Nothing here writes to the config repo. Keymap edits go to `config/*.keymap`
-there; firmware is built by GitHub Actions on push to that repo.
+### 1. Requirements
 
-## Working in tandem with the ZMK config repo
+- **Python 3.9+.** The Python side has no dependencies.
+- **Node**, to build the web app. `make design` does it for you.
+- **Docker**, for the build itself. Your user has to be able to run `docker`
+  without sudo (on Linux, be in the `docker` group). Without Docker the app
+  still designs, checks and exports keymaps; the **Build firmware** button is
+  off and says why.
 
-VileMK is the second half of a two-repo setup. The first half is ZMK's own,
-done as ZMK's docs describe. VileMK starts where the CLI stops.
-
-1. **Install the ZMK CLI and create the config repo.** [Installing
-   ZMK](https://zmk.dev/docs/user-setup) covers installing the CLI and running
-   `zmk init`, which creates the config repo on GitHub, clones it, and wires
-   up the GitHub Actions workflow that builds firmware on every push.
-
-2. **Add your keyboard.** [Keyboard
-   management](https://zmk.dev/docs/zmk-cli#keyboard-management) covers both
-   kinds:
-   - A keyboard ZMK itself defines: run `zmk keyboard add` and pick it from
-     the list.
-   - A keyboard defined in a vendor's repository (an external module, as with
-     the Eyelash Sofle): the same command takes the vendor's repo, adds it to
-     `config/west.yml`, and downloads it into `.zmk/modules/`.
-
-   Either way the CLI ends by adding entries to `build.yaml` and copying a
-   default keymap into `config/`.
-
-3. **Push once and flash the default firmware.** Optional. A passing build
-   before any custom keymap confirms the setup itself is sound.
-
-4. **Run the VileMK server and modify the mappings:**
-
-   ```bash
-   make design
-   ```
-
-   No flags, no keymap argument. The server finds the config repo and loads
-   the keymap `zmk keyboard add` installed into `config/`, drawn on its real
-   key positions. Click keys to reassign them; design VileDances, macros,
-   combos, modifiers and layers on top.
-
-5. **Save your work as a variant and hand it back.** **Save as new variant**
-   writes the modified keymap and a matching `build.yaml` under `variants/`
-   in this repo, never into the config repo. Copying it across and pushing is
-   a manual step, covered in
-   ["Putting a variant on the keyboard"](#putting-a-variant-on-the-keyboard).
-
-The ZMK CLI sets up and builds. Mappings change in the VileMK server, and
-`variants/` carries them back.
-
-## Requirements
-
-**Python 3.9+ and Node.** The Python side has no dependencies, but the keymap
-UI is a React app in `web/` and has to be built once. Its output,
-`vilemk/webui/dist/`, is generated rather than committed, so build it after
-cloning and again whenever anything under `web/src/` changes:
+### 2. Fetch ZMK
 
 ```bash
-make web
+make zmk
 ```
 
-`make design` depends on that target, so the ordinary path stays one command.
-Once `node_modules/` exists the build takes a few seconds. If you ever see a
-page saying the app is not built yet, that is the command it is asking for.
+That downloads the parts of ZMK the app needs and pins the exact commit, so
+every keyboard and every variant is checked and built against the same ZMK. The
+**ZMK** link under the logo in the app opens the same thing as a settings
+sheet, with an **Update** button.
 
-Optionally, `pyproject.toml` installs the three tools as commands
-(`vilemk-keypos`, `vilemk-check`, `vilemk-design`), so they work
-from inside the config repo without a path to this one:
-
-```bash
-uv tool install --editable .    # or: pip install -e .
-```
-
-## Tools
-
-| Command | What it does |
-|---|---|
-| `python3 -m vilemk.keypos config/<board>.keymap` | Prints the key-position map for a keyboard: the numbers `key-positions` and `hold-trigger-key-positions` refer to. |
-| `python3 -m vilemk.check config/<board>.keymap` | Static validation before a CI round-trip: binding counts per layer, out-of-range positions, undefined `&labels`, bad keycodes, arity, braces. It also reads `build.yaml` and flags halves built from different keymaps, a `KEYMAP_FILE` that names nothing, a part the vendor builds that your entry leaves out, and colliding artifact names. Pass `--no-build-list` for keymaps only. |
-| `python3 -m vilemk.webui.server` | The app: every keymap drawn on its real key positions, with layer tabs, combos and a compare view, plus the editor — design VileDances, macros, combos, modifiers and layer bindings in Vial-style panels, click keys to reassign them, save to `custom/` and `variants/`, and export or import a `.keymap`. |
-
-### Designing a keymap: every tab in the app
+### 3. Start the app
 
 ```bash
 make design
 ```
 
-This opens the viewer at `http://127.0.0.1:7879` with one board on screen and
-a menu of eight tabs underneath it: **Keyboard**, **Media & system**,
+It builds the web app, then serves it on `http://127.0.0.1:7879`.
+
+### 4. Add your keyboard
+
+**Add a keyboard** in the sidebar lists every keyboard in ZMK and in the
+keyboard modules you have installed. If yours comes from a vendor module that
+is not installed yet, paste the module's GitHub URL and a branch or tag into
+the same dialog; its keyboards then appear in the list. Adding a keyboard puts
+its vendor keymap under **Vendor defaults** in the sidebar. For a keyboard that
+plugs into a separate controller, you pick the controller.
+
+### 5. Make a variant
+
+Select the vendor default, change what you want on the board, and press
+**Save as…**. It asks for a name and adds the keymap to **Saved variations**.
+From then on you edit the variant, and its **Save** button offers **Overwrite**
+or **Save as…**.
+
+Vendor defaults are never edited. They are the starting point and the thing
+**compare with…** compares against.
+
+### 6. Build
+
+<img src=".github/images/build-panel.png" width="800" alt="The Build panel open: include reset ticked, the nice_view and nice_view_custom parts unticked, and the Build firmware button">
+
+The **Build** panel under the Save button holds the build options for the
+variant on screen:
+
+- **include reset** also builds a settings reset file for each half. See the
+  warning under step 7 for when you need it.
+- **has** lists the parts the vendor builds for (screens, add-on modules), per
+  half. Tick the ones physically on your keyboard. An unticked screen also
+  switches the display off for that half, so the build does not fail looking
+  for hardware that is not there.
+
+**Build firmware** uses those choices even if you haven't saved, and the
+variant remembers them. The build log streams into the dialog, and the build
+can be cancelled.
+
+The first build pulls ZMK's build image (about 3 GB) and fetches ZMK, Zephyr
+and the hardware libraries. That takes several minutes. A later build of a
+split keyboard takes about 20 seconds.
+
+![The build dialog after a successful build, listing the four .uf2 files written to the variant's firmware folder](images/successful-build.png)
+
+When it finishes, the dialog lists the files it wrote. **Open folder** opens
+the firmware folder in your file manager and **Copy path** copies its location.
+Before a build, the same list shows what is already there: files the next
+build replaces are in orange, files it will remove are struck out.
+
+The same build from a terminal:
+
+```bash
+make firmware ARGS=<variant>
+```
+
+### 7. Flash
+
+Put the keyboard into its bootloader (on most boards, double-tap reset and it
+mounts as a USB drive) and copy its `.uf2` across. A split keyboard has one
+file per half, for example `eyelash_sofle_left-zmk.uf2` and
+`eyelash_sofle_right-zmk.uf2`, and each half is flashed with its own. A board
+that produces a `.bin` instead has no drive to copy to; flash it with the
+board's own tool.
+
+> [!WARNING]
+> **If the keyboard has ever been used with ZMK Studio**, flash the settings
+> reset first. ZMK Studio saves the keys you change in it to the keyboard's
+> settings storage, and on every boot those saved keys override the keymap in
+> the firmware, for those positions only. Flashing new firmware does not clear
+> them and neither does the reset button. The symptom is a keyboard that runs
+> your new keymap except for a few keys that do something else or nothing.
+> It happens with any ZMK firmware, however it was built.
+>
+> Tick **include reset** before building. Flash the two `settings_reset-…`
+> files to their halves, then the firmware, then pair Bluetooth again: the
+> reset clears the Bluetooth pairings too.
+
+## The keyboard list
+
+The sidebar has two groups.
+
+**Saved variations** are your keymaps. They are the only ones you can
+overwrite and build.
+
+**Vendor defaults** are the keymaps that come with a keyboard. They are for
+comparing against (**compare with…**) and for starting a new variation.
+
+Some vendors ship two keymaps for one keyboard, so the keyboard is listed
+twice, each marked:
+
+- **board default** is the keymap ZMK falls back to when a build names none.
+- **vendor's firmware** is the keymap the vendor's released firmware is built
+  from. It can differ from the board default. The Eyelash Sofle's has a fourth
+  layer, left empty as a spare. It is listed one step in, under the board
+  default.
+
+The **⋮** button beside each row has **Export keymap**, **Export as picture**,
+and **Delete**. Delete on a variation deletes it and its built firmware. On a
+vendor default it removes the keyboard from the project, and the keyboard's
+module with it. That is refused while variations use the keyboard, and the
+dialog names them; delete those first.
+
+### Keyboard modules
+
+**Add a keyboard** also lists your modules. **Update** fetches the latest
+commit of the module's branch or tag and checks your variations against it
+before replacing anything. If one would break (a key removed from the layout, a
+board renamed), the module is left as it was and the dialog lists what would
+break, with **Overwrite** to install it anyway. **Remove** is refused while a
+variation still uses one of the module's keyboards. **Rename** changes only the
+name the app shows.
+
+A module has to be a clean ZMK module: a `zephyr/module.yml` and the keyboard's
+files under `boards/`, laid out as ZMK expects, with no custom CI rearranging
+them. Many keyboard repositories on GitHub are personal configs that only build
+through their owner's workflow. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) says how
+to tell them apart, what each build error means, and how to fork a repository
+into shape.
+
+From the command line:
+
+```bash
+make module ARGS="add <github-url> --ref main"
+```
+
+```bash
+make module ARGS=<name>
+```
+
+## Designing a keymap: every tab in the app
+
+Under the board is a menu of eight tabs: **Keyboard**, **Media & system**,
 **VileDance**, **Macros**, **Modifiers**, **Layers**, **Combos** and
 **Conditional layers**.
 
 Click a key on the board to open its editor. Whichever tab you're on, picking
 something fills that key. The tabs' **+ New …** buttons open a creation panel
 above the menu instead, and the menu then fills whichever field in that panel
-you last clicked. Only one thing is ever open at once, a key editor or a
-panel, but switching loses nothing you typed: each kind keeps its own unsaved
-draft, and the tab you left grows a **Resume …** button until you finish it
-or start a fresh one.
+you last clicked. Only one thing is ever open at once, a key editor or a panel,
+but switching loses nothing you typed: each kind keeps its own unsaved draft,
+and the tab you left grows a **Resume …** button until you finish it or start a
+fresh one.
 
 Six of the eight tabs fill a field this way. **Combos** and **Conditional
 layers** don't, because nothing on the board can point at either one. You
-switch those on or off for the keymap you're looking at. Both are covered
-below.
+switch those on or off for the keymap you're looking at.
 
-Rotary encoders are not editable in the app yet. A layer's `sensor-bindings`
-is a separate property from its key `bindings`, and the knob has no key
-position on the board to click, so the editor never sees it. Encoder bindings
-are still checked by `make check`, which validates their keycodes, and saving a
-variant carries the base keymap's `sensor-bindings` through as they are. To
-change one, edit the keymap by hand; see the Encoder recipe in
-[docs/recipes.md](docs/recipes.md). What it would take to build is written up
-in [docs/todo.md](docs/todo.md).
+The **key positions** checkbox under the layer tabs numbers every key on the
+board. **+ layer** beside the layer tabs adds a layer, up to ZMK's own 32-layer
+cap. **Empty layer** asks for a name and starts the layer blank (every key
+transparent). **Layer from another keyboard…** copies a layer from one of your
+saved variations, on any keyboard: search for the variation, pick the layer,
+and **Import**. Nothing is written until you save.
 
-#### Keyboard
+A copied layer is matched to this keyboard by key position number: key 0 goes
+on key 0, key 1 on key 1, and so on. Each keyboard numbers its keys by its own
+layout, so turn on key positions to see where a key lands. On a keyboard with
+more keys the extra keys stay transparent. On one with fewer, the bindings past
+its last key are left out, and the dialog lists them before you import. The
+VileDances, macros and layer entries the layer uses come along when you save.
+Layer keys keep their numbers: `&mo 2` switches to layer 2 of the keymap you
+are editing.
 
-The plain 104-key ANSI layout. Click a key on the board to open its editor,
-then click a key on this tab: that assigns the keycode straight away, with no
-separate confirm step. Typing a binding by hand into the key editor's own
-field still needs **Apply**.
+Rotary encoders are not editable in the app yet. Saving a variant keeps the
+encoder bindings the keymap already had, and `make check` still validates them.
+To change one, edit the keymap file by hand.
 
-<img src=".github/images/tab-keyboard.png" width="560" alt="The Keyboard tab's picker: the 104-key ANSI board, with Tab picked for the open key">
+Each tab and its settings are described in [KEYMAP.md](KEYMAP.md):
+[Keyboard](KEYMAP.md#keyboard),
+[Media & system](KEYMAP.md#media--system),
+[VileDance](KEYMAP.md#viledance-vial-style-tap-dances),
+[Macros](KEYMAP.md#macros),
+[Modifiers](KEYMAP.md#modifiers),
+[Layers](KEYMAP.md#layers) and
+[Combos and Conditional layers](KEYMAP.md#combos-and-conditional-layers).
 
-#### Media & system
+### Saving
 
-Everything ZMK can send that a keyboard has no keycap for, in seven groups:
-
-| group | examples | what the board needs |
-|---|---|---|
-| Media and consumer | volume, play/pause, brightness | nothing; every board sends these |
-| Mouse | left/right/middle click, pointer movement, scroll | `CONFIG_ZMK_POINTING` |
-| Bluetooth and output | profile select, clear, USB/BLE output | a wireless board |
-| Lighting | underglow and backlight on/off, brightness, effect | the LEDs, plus the matching Kconfig |
-| Power and firmware | soft off, bootloader, reset, Studio unlock | reset and bootloader are universal; the rest are not |
-| Typing extras | caps word, key repeat, grave escape | nothing |
-| Sticky and locked keys | one-shot (`&sk`) and latched (`&kt`) over the eight modifiers | nothing |
-
-Each group names what has to be true of the board before its buttons do
-anything. A binding whose feature the firmware was never built with fails to
-compile rather than misbehaving. Saving a variant adds whatever `#include`
-lines those bindings need and says so in the save message; you never add them
-by hand.
-
-This tab saves nothing. No record, no card, just a picker like Keyboard.
-
-<img src=".github/images/tab-media-system.png" width="560" alt="The Media & system tab's picker: seven labelled groups of buttons, from media codes to sticky modifiers">
-
-#### VileDance: Vial-style tap dances
-
-Vial, the QMK-world editor this project takes its name from, has a
-**TapDance** key: one key position, up to four outputs depending on how you
-hit it (a tap, a hold, a double tap, or a double tap where the second press is
-held). ZMK has nothing that does all four in one behavior; getting a hold
-*and* a double-tap out of a single key means nesting a hold-tap inside a
-tap-dance. A **VileDance** is that composition, built for you from four
-fields:
-
-| slot | fires on |
-|---|---|
-| on tap | a single press and release |
-| on hold | pressing and holding past the tapping term |
-| on double tap | two presses within the tapping term |
-| on tap + hold | the second press held down |
-
-Fill only **on tap** and you get a plain key, with no extra devicetree. Add
-**on hold** and it becomes one hold-tap behavior. Add **on double tap** (and
-optionally **on tap + hold**) and it becomes a tap-dance holding one or two
-hold-taps. A hold slot has to be a behavior that takes exactly one parameter
-(`&kp`, `&mo`, `&sk`), not one that takes none.
-
-Two settings shape the timing. **Tapping term** sets how long a hold has to
-last and how much time a second tap has to land in. **Flavor** decides how the
-hold-tap resolves an interrupting keystroke. The tap/hold pair keeps whatever
-flavor you set; the double-tap/tap-hold pair always resolves fast
-(`balanced`), because by the second press you have already committed to
-something other than plain typing, and a layer-hold there should engage the
-instant the next key lands. When tuning, note that a tap-dance's own term runs
-before the nested hold-tap's, so a plain hold on this key lands at roughly
-*twice* the tapping term you set.
-
-A VileDance can't hold another VileDance in one of its four slots (a tap-dance
-inside a tap-dance has timing nobody could predict), but it can hold a
-**macro** in the double-tap or tap-hold slot. "Double tap to type my email" is
-what that slot is for.
-
-A saved VileDance is a live reference: bind it to as many keys as you like,
-and editing the record later changes every one of them the next time you save
-a variant. The board tile for a key bound to one shows the resolved tap with a
-small hint for the hold in the corner, rather than the raw generated label.
-
-<img src=".github/images/tab-viledance.png" width="380" alt="The VileDance panel: Name, four slots, tapping term and flavor, over Save/Devicetree/Close/Delete">
-
-#### Macros
-
-A **macro** is a sequence played back from one key, built from six kinds of
-step:
-
-| step | does |
-|---|---|
-| text | types the string you enter: one field for `someone@example.com` instead of nineteen key steps |
-| tap | presses and releases one binding |
-| press | holds a binding down across the steps that follow |
-| release | lets a held binding go |
-| wait | pauses for a number of milliseconds |
-| pause | stops until the key the macro is bound to is itself released |
-
-Add steps with the buttons at the bottom of the panel, reorder two with the
-↑/↓ next to each row, remove one with ✕. A text step only understands what a
-keyboard can actually type (letters, digits, the shifted symbols, space, tab,
-newline). Anything else, such as accented letters or emoji, is refused rather
-than silently dropped, since there is no key position for it to send. One
-macro can also only queue so much at once, capped by ZMK's own
-`CONFIG_ZMK_BEHAVIORS_QUEUE_SIZE` (64 by default). A macro over that limit is
-refused at save time rather than failing partway through on the keyboard.
-
-A macro can't hold itself as one of its own steps, but it can hold another
-saved macro, and can be the target of a VileDance slot or a combo's output.
-
-<img src=".github/images/tab-macros.png" width="420" alt="The Macros panel: a saved ctrl+alt+delete macro, six press/release steps with reorder and delete controls">
-
-#### Modifiers
-
-A chain of up to three [ZMK modifier
-functions](https://zmk.dev/docs/keymaps/modifiers), shift, control, alt or
-gui, each left or right, wrapped around a keycode. For example ctrl+shift+A.
-Click up to three of the eight modifier buttons in the panel (**remove last**
-and **clear** walk them back), then use the menu below to fill **Parameter**
-with the key they wrap: a plain key, or another saved modifier nested inside
-this one's innermost slot.
-
-Unlike a VileDance, a modifier's resolved text is baked in wherever you pick
-it. There is no reference back to the saved record, because a modifier chain
-is ZMK preprocessor syntax rather than a devicetree behavior. Editing a saved
-modifier later leaves a key that already picked it alone; re-pick it to
-propagate the change.
-
-<img src=".github/images/tab-modifiers.png" width="560" alt="The Modifiers panel: a saved ctrl+shift+F10 chain, the eight modifier buttons, and the resolved Parameter">
-
-#### Layers
-
-Layer switching in all five of ZMK's shapes, as one-click rows at the top of
-the tab. Four of them need no saving, since a layer number is the whole story:
-
-| row | behavior | what it does |
-|---|---|---|
-| Hold | `&mo` | layer on while held, off on release |
-| Tap key / hold layer | `&lt` | tap for a key, hold for the layer |
-| Sticky | `&sl` | one shot, on for the next key press only |
-| Toggle | `&tog` | on until the same key is pressed again |
-| Switch to | `&to` | switches to this layer and turns every other one off |
-
-**Tap key / hold layer** is the one row worth naming and saving. Give it a
-tapping term or a flavor and it becomes its own generated hold-tap, with the
-same live-reference behavior a VileDance has: a saved card you can bind to
-several keys and edit in one place. Leave both blank and it builds the same
-plain `&lt` the ad-hoc row gives you for free.
-
-The Layers tab is also where you add a layer to the keyboard: a **+ layer**
-button next to the layer tabs above the board, up to ZMK's own 32-layer cap.
-It prompts for a name and starts the layer blank (every key `&trans`) until
-you assign something into it; nothing is written until you save a variant.
-
-<img src=".github/images/tab-layers.png" width="560" alt="The Layers tab's picker: the five ad-hoc rows, one button per layer, with two saved layer-tap cards below">
-
-#### Combos and Conditional layers
-
-The two board-wide tabs. A **combo** fires a binding when two or more keys on
-the board are pressed together. Open its panel and click the keys on the board
-above to build the chord, same board, no separate picker. A **conditional
-layer** turns a layer on automatically while two or more other layers are held
-together; the common case is hold layer 1 and layer 2, get layer 3.
-
-Neither goes on a key, so neither can be picked into a field. What you decide
-instead is whether *this keymap* gets it. Each row has an On/Off switch, per
-keymap file, so the same combo can be on for one variant and off for another.
-A newly created one is switched on only for the keymap you designed it
-against; flip it on for others yourself.
-
-<img src=".github/images/tab-combos.png" width="380" alt="The Combos panel: a saved chord's Name, Keys, Output key and Timeout"> <img src=".github/images/tab-conditional-layers.png" width="380" alt="The Conditional layers panel: a saved tri-layer rule's Name, If layers and Then layer">
-
-#### Saving
-
-Every design above is written to `custom/` as you work, independent of any
-keymap. Nothing reaches a keymap file until you save a variant, covered in
-["Save your work as a variant and hand it
-back"](#working-in-tandem-with-the-zmk-config-repo) above. Only the generated
-behaviors your keys, VileDances and combos actually reference are written;
-anything designed but never bound stays out of the file.
-
-### make
-
-```
-make          # check every keymap, then build the app and serve it
-make design   # build the app if needed, then serve it
-make check    # validation only: build.yaml, then config/ and variants/
-make web      # build the UI (needs Node) into vilemk/webui/dist/
-make webdev   # the Vite dev server for it, with live reload
-make pos      # key-position maps
-make install  # put the vilemk-* commands on your PATH
-make clean
-```
-
-Pass extra flags through `ARGS`, e.g. `make check ARGS="config/corne.keymap"`.
-
-`make` only looks for a Makefile in the current directory; it has none of the
-repo-finding logic the tools do. From anywhere else, point it here:
-
-```bash
-make -C ~/git/VileMK          # or: make -C ~/git/VileMK check
-```
-
-Or run `make install` once and use `vilemk-design`, `vilemk-check` and
-`vilemk-keypos` directly; those find the config repo on their own, from any
-directory.
-
-## variants/
-
-Saved copies of a keymap, never built. See
-[variants/README.md](variants/README.md). Each one is a folder holding the
-keymap and the `build.yaml` that builds it.
+Everything you design in the tabs is saved as you work, independent of any
+keymap. Nothing reaches a keymap until you save a variant. Only the generated
+behaviors your keys, VileDances and combos actually reference are written into
+it; anything designed but never bound stays out.
 
 ## Sharing a layout
 
-Sharing means sharing the `.keymap`. **Export keymap**, above the board, writes
-the variant's own file with one extra comment line in it: a JSON manifest of the
-VileDances, macros, combos and layer entries the keymap uses. The file still
-compiles for someone who has never heard of VileMK, and the comment is what lets
-someone who has restore the records behind the generated behaviors.
+Sharing means sharing the `.keymap`. **Export keymap** in a row's **⋮** menu
+works for variations and vendor defaults. It offers **Save as…** (pick where to
+write the file) or **Copy to clipboard**, and **include key positions** adds a
+comment at the top of the file drawing the layout with each key's position
+number. The exported file carries one extra comment line listing the
+VileDances, macros, combos and layer entries the keymap uses, which is what
+lets VileMK restore them on import. The compiler ignores it.
 
 **Import a .keymap** in the sidebar takes one back, or you can drop the file on
 the sidebar. It refuses a keymap for a keyboard you have not added, since
-without the physical layout there is nothing to draw. Where an incoming record
-has the same name as one of yours but different contents, it asks: rename the
-incoming one (every reference in the keymap is rewritten to match) or keep
-yours. Your own records are never overwritten. What it writes is a new variant,
-and it runs the same checks `make check` does before handing it back.
+without the physical layout there is nothing to draw, and tells you which
+module to add. Where an incoming record has the same name as one of yours but
+different contents, it asks: rename the incoming one (every reference in the
+keymap is rewritten to match) or keep yours. Your own records are never
+overwritten. What it writes is a new variant, and it runs the same checks
+`make check` does before handing it back.
 
-**Copy image**, **Save PNG** and **Save SVG** are beside Export, for pasting a
-layout into a chat. They carry whichever theme you are looking at.
+**Export as picture**, in the same menu, has **Copy image**, **Save PNG** and
+**Save SVG**, for pasting a layout into a chat.
 
-## Putting a variant on the keyboard
+## Building firmware in detail
 
-**The short way.** The designer writes a variant as a folder with both files
-in it, so putting one on the keyboard is two copies and a push:
+**Build firmware** compiles every half of the variant, plus the settings reset
+files if **include reset** is ticked. The firmware folder is replaced only when
+everything built; a failed or cancelled build leaves the previous files. A
+variant whose keyboard is not installed (its module was removed, or the keymap
+came from someone else) is refused before Docker starts, with a message naming
+the missing board.
 
-```bash
-cp variants/<name>/<name>.keymap  /path/to/zmk-config/config/
-cp variants/<name>/build.yaml     /path/to/zmk-config/build.yaml
-make check          # keymap and build list, before the round trip
-```
-
-That generated `build.yaml` contains your repo's own entries for that
-keyboard with only the `KEYMAP_FILE` swapped, so a split keeps both halves
-and a `shield:` or `snippet:` survives. It also replaces everything else the
-repo built. To keep building the original keymap too, merge by hand using the
-rest of this section, giving each entry an `artifact-name:`.
-
-The rest of this section covers what that file does, and what to know when
-writing one by hand.
-
-Nothing in `variants/` is ever built. The config repo's `build.yaml` drives
-GitHub Actions, and ZMK picks a keymap by name: for each entry it looks in
-`config/` for a file named after the board or shield being built,
-`<board>.keymap` or `<shield>.keymap`. That is the file the `zmk` CLI
-installed. Leave it alone; add your variant beside it and tell the build to
-use the variant.
-
-**1. Copy the variant into the config repo's `config/` directory, under a
-name that matches no board and no shield.** The convention in `variants/`
-works here too: `<keyboard>-<what-it-is>.keymap`. The suffix keeps the file
-inert, since ZMK's name-based lookup will not pick it up on its own, so the
-keymap the CLI installed stays as it is, just no longer the one being built.
-
-The file has to live in the config repo. GitHub Actions only ever checks out
-that repo and has no idea VileMK exists.
-
-**2. Point the build at it.** In the config repo's `build.yaml`, give every
-entry for that keyboard a `cmake-args` line naming your file:
-
-```yaml
-include:
-  - board: <board>
-    cmake-args: -DKEYMAP_FILE="${GITHUB_WORKSPACE}/config/<your-variant>.keymap"
-```
-
-Entries that use a shield keep their `shield:` line; only `cmake-args` is
-added.
-
-`KEYMAP_FILE` is a ZMK build setting. It names the keymap outright, so the
-search by board name never runs. Write the path with `${GITHUB_WORKSPACE}` as
-above rather than as a relative path; the build does not always run from the
-directory you would expect.
-
-A split keyboard has one entry per half, and both need the line, pointing at
-the same file. The halves are two separate microcontrollers, each with its
-own firmware, built from the same single keymap file: one keymap, two `.uf2`
-files. Giving the two halves different keymaps produces a keyboard whose left
-side does not agree with its right.
-
-> **Watch `build.yaml` after every `zmk keyboard add`.** The CLI writes those
-> entries itself, and it writes them plain: no `cmake-args`, and for a split,
-> one entry per half. Anything it adds or re-adds is therefore back on the
-> name-based lookup and building the CLI's own keymap, not yours. After each
-> run, reopen `build.yaml` and put the line back on both halves, spelled
-> identically. It drops more than the keymap line; see "What else the CLI
-> leaves out" below.
-
-To keep building the original keymap as well, leave the existing entries
-alone and add extra ones carrying the `cmake-args`, each with an
-`artifact-name`, so the two builds' `.uf2` files do not collide inside
-`firmware.zip`.
-
-**3. Validate, then commit and push in the config repo.** The push triggers
-the build:
+The build runs in `zmkfirmware/zmk-build-arm:stable`, the image ZMK's own build
+workflow uses. The ZMK and Zephyr sources it fetches on the first build are
+kept in a Docker volume, `vilemk-zmk`, and reused by later builds. To free the
+space:
 
 ```bash
-make check ARGS="<path to the copy you made in config/>"
+docker volume rm vilemk-zmk
 ```
 
-That reads the keymap and `build.yaml`, so the line you just added is checked
-too: whether both halves carry it, whether it points at a file that is really
-there, and whether it is written as an absolute path.
+The next build fetches them again.
 
-When the run finishes, download its `firmware.zip`. Put each half into its
-bootloader (on most boards, double-tapping reset mounts it as a USB drive)
-and copy the matching `.uf2` across.
+### Parts the vendor lists
 
-To go back to the original keymap, delete the `cmake-args` lines and push.
-The file the CLI installed was never touched, so the name-based lookup finds
-it again.
+Most keyboards are more than a board. A screen, an encoder or an add-on module
+is a separate part the build has to be told about, on the half it is plugged
+into. The vendor writes one build list for every version they sell, with a
+screen and without, so it cannot say which one is on your desk. That is what
+the Build panel's **has** boxes are for.
 
-### What else the CLI leaves out
-
-`zmk keyboard add` gives you a starting point. It writes the shortest thing
-that could work, the board name and nothing else, because it cannot know what
-you actually own.
-
-Most keyboards are more than a board. A screen, an encoder, or an add-on
-module is a separate part the build has to be told about, on the line for the
-half it is plugged into. The same keyboard is often sold in several versions
-(with a screen and without, one encoder or two), all built from one set of
-files by the same vendor. So there is no single correct build list the CLI
-could have written for you: there is the vendor's list, describing the
-versions they sell, and yours, describing the one on your desk. Reconciling
-the two is a step you do by hand, once, per keyboard.
-
-Skip it and the build either comes back missing a feature, or fails with a
-compiler error that says nothing about the missing line.
-
-**Where to look.** The vendor's own list ships with the keyboard's code,
-which the CLI downloaded into the config repo when you added the keyboard. In
-the config repo, open:
-
-```
-.zmk/modules/<keyboard-module>/build.yaml
-```
-
-`<keyboard-module>` is the folder named after your keyboard; for an Eyelash
-Sofle, `.zmk/modules/zmk-eyelash-sofle`. Nothing under `.zmk/` is yours, it is
-a downloaded copy, so read it and never edit it: the next fetch overwrites it.
-If the folder is not there yet, the same file is on the keyboard's GitHub
-page, at the top level of the repository `config/west.yml` names.
-
-Put that file beside your own `config/build.yaml` and compare them entry by
-entry. For each half, the vendor's file may carry lines yours does not:
-
-| line | what it means |
-|---|---|
-| `shield:` | an extra part on that half, most often a screen. Missing it is what makes a build fail on a keyboard that has a display. |
-| `snippet:` | an optional build mode, like the one that enables ZMK Studio |
-| `cmake-args:` | build settings; yours already has one naming your keymap |
-| `artifact-name:` | a label so two `.uf2` files in the same download do not collide |
-
-**What to copy: the `shield:` lines, for the parts you actually have.** Take
-them exactly as spelled, onto the half they belong to. Leave your own
-`cmake-args` line where it is and add the shield beside it:
-
-```yaml
-include:
-  - board: eyelash_sofle_left
-    shield: nice_view
-    cmake-args: -DKEYMAP_FILE="${GITHUB_WORKSPACE}/config/eyelash_sofle-colemak.keymap"
-```
-
-The rest of the vendor's entries, such as a Studio build or a settings-reset
-build, are extra firmware files you may not want. Copy those only if you know
-you need them.
-
-**When you do not have the part.** This is the version problem above, and it
-takes one more step. Leaving the `shield:` line out is right, but it may not
-be enough on its own. A vendor building for the version with the part often
-switches that feature on for everyone, down in the keyboard's own settings.
-The build then goes looking for hardware that is not there and fails. You
-have to switch it back off.
-
-Do it without touching the vendor's files. Make a file in the config repo's
-`config/` directory named after the half it applies to
-(`config/<board>.conf`, so `config/eyelash_sofle_left.conf` for an Eyelash
-Sofle's left side) holding the one line that turns the feature off:
+An unticked screen switches the display off for that half, because a vendor
+building for the version with a screen often turns the display on for
+everyone, and the build then fails looking for hardware that is not there. To
+switch a feature off for a half yourself, put the setting in that half's
+`.conf` file in `config/`, named after the board (for an Eyelash Sofle's left
+half, `config/eyelash_sofle_left.conf`):
 
 ```
 CONFIG_ZMK_DISPLAY=n
 ```
 
-The file is added on top of the vendor's settings rather than replacing them:
-only what you write here changes, and everything else the keyboard needs
-carries on untouched. It is yours. The CLI never touches it, and it survives
-every `zmk keyboard add` from here on.
+It is added on top of the vendor's settings, and nothing VileMK fetches ever
+overwrites it.
 
-The mirror image is yours to handle too: a part you added that the vendor
-never listed needs its own line here.
-
-**`make check` reads `build.yaml` too**, and every mistake in this section is
-one it looks for: the two halves naming different keymaps, a `KEYMAP_FILE`
-that points at nothing, a vendor `shield:` your entry left out with no
-`.conf` line switching the matching feature off, and two entries whose
-`.uf2` files collide. It compares your build list against the vendor's own,
-in the CLI cache, and against what is actually in `config/`. It never writes.
-It prints the line to add, and you edit and push.
-
-It cannot check everything. A `shield:` the vendor never listed, a part they
-list under a name that looks nothing like a display, or a keyboard with no
-vendor module in the cache at all are still yours to read for. When it has
-nothing to compare against it says so rather than staying quiet.
+`make check` compares a variant's build against the vendor's list and prints
+what is missing, such as a part the vendor builds that your variant leaves out
+with nothing switching the matching feature off. It never changes anything. It
+cannot catch a part the vendor never listed, or a keyboard with no vendor
+module at all, and says so when it has nothing to compare against.
 
 ### A worked example: Eyelash Sofle
 
-`zmk keyboard add` has been run once for an Eyelash Sofle. The config repo
-now has `config/eyelash_sofle.keymap`, the CLI's default keymap, and a
-`build.yaml` holding one entry per half:
+The Eyelash Sofle comes from the `zmk-eyelash-sofle` module, and after adding
+it the sidebar shows its keymaps under **Vendor defaults**. In the app you
+design some VileDances and combos, bind them, and **Save as…**
+`eyelash_sofle_colemak`.
 
-```yaml
-include:
-  - board: eyelash_sofle_left
-  - board: eyelash_sofle_right
+The vendor lists `nice_view` on the left half and `nice_view_custom` on the
+right, so the Build panel shows both under **has**. This keyboard has no
+screens, so both stay unticked, and the left half gets its display switched
+off.
+
+**Build firmware** then writes `eyelash_sofle_left-zmk.uf2` and
+`eyelash_sofle_right-zmk.uf2`. Flash the left half with the left file and the
+right half with the right one. If the keyboard has been used with ZMK Studio,
+read the warning under [step 7](#7-flash) first.
+
+## make
+
+```
+make          # check every keymap, then build the app and serve it
+make design   # build the app, then serve it
+make check    # validate every keymap and build list
+make pos      # print each keyboard's key-position map
+make zmk      # fetch ZMK and pin the commit
+make module ARGS=<name>        # fetch or update a keyboard module
+make firmware ARGS=<variant>   # build a variant's firmware (needs Docker)
+make install  # put the vilemk-* commands on your PATH
 ```
 
-In VileMK you designed some VileDances and combos, bound them, and hit **Save
-as new variant**, which wrote `variants/eyelash_sofle-colemak.keymap`.
+If the page ever says the app is not built yet, run `make web`.
 
-Copy that file into the config repo's `config/` directory. Keep the name:
-`eyelash_sofle-colemak.keymap` matches neither board, so ZMK will not find it
-by name, and `eyelash_sofle.keymap`, which does match and which the CLI owns,
-stays where it is.
-
-Then edit `build.yaml` so both halves name the file you just copied:
-
-```yaml
-include:
-  - board: eyelash_sofle_left
-    cmake-args: -DKEYMAP_FILE="${GITHUB_WORKSPACE}/config/eyelash_sofle-colemak.keymap"
-  - board: eyelash_sofle_right
-    cmake-args: -DKEYMAP_FILE="${GITHUB_WORKSPACE}/config/eyelash_sofle-colemak.keymap"
-```
-
-The two lines are identical: same file, both halves.
-
-Now the check above. `.zmk/modules/zmk-eyelash-sofle/build.yaml` carries
-`shield: nice_view` on the left half and `shield: nice_view_custom` on the
-right. This keyboard was sold with screens, and the CLI's two plain entries
-say nothing about them. Which lines you want depends on the version you own:
-
-- **With the screens**: add each `shield:` line to its half, beside the
-  `cmake-args` line already there.
-- **Without them**: leave the shields out. The left half's own settings
-  switch the display feature on regardless, and the build then fails on a
-  missing screen, so add `config/eyelash_sofle_left.conf` containing
-  `CONFIG_ZMK_DISPLAY=n`. The right half needs nothing; its settings never
-  turn the display on.
-
-Check the copy, then commit and push in the config repo:
+`make` only looks for a Makefile in the current directory. From anywhere else,
+point it at the checkout:
 
 ```bash
-make check ARGS="/path/to/zmk-config/config/eyelash_sofle-colemak.keymap"
+make -C path/to/VileMK
 ```
 
-The run produces a `firmware.zip` holding `eyelash_sofle_left-…-zmk.uf2` and
-its right-hand counterpart. Flash the left half with the left file and the
-right half with the right one.
-
-The Eyelash Sofle is a board, so its entries have no `shield:` line. A
-keyboard built as a shield on a generic controller, like a Corne on a
-nice!nano, has `board:` and `shield:` on each entry; leave both alone and add
-the same `cmake-args` line beside them.
+Or run `make install` once and use the `vilemk-*` commands (`vilemk-design`,
+`vilemk-check`, `vilemk-build` and the rest) from any directory.

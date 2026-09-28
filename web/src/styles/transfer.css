@@ -1,5 +1,5 @@
-/* Export buttons, the export dialog, the sidebar's import target, and the
-   import dialog. */
+/* Export buttons, the export dialog, the sidebar's import target, the
+   import dialog, the layer import dialog, the settings sheet, the keyboards sheet, the build sheet, the save-as sheet and the confirm sheet, which share the modal. */
 aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
 .impbtn{display:block;width:100%;margin:0 0 10px;text-align:center}
 
@@ -10,6 +10,13 @@ aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
   padding:18px 20px;width:min(760px,100%)}
 .sheet h2{margin:0;font-size:17px}
 .sheet .bar{margin-bottom:10px}
+.sheet.saveas{width:min(460px,100%)}
+.sheet.confirm{width:min(420px,100%);margin:auto 0}
+.sheet.confirm .body{margin:10px 0 0;color:var(--muted);line-height:1.5}
+.sheet.confirm .actions{justify-content:flex-end;margin:16px 0 0}
+.sheet.confirm .actions .qhelp .tip{top:auto;bottom:calc(100% + 6px)}
+.sheet.confirm .field{display:block;width:100%;margin:12px 0 0}
+.sheet.confirm .body ul{margin:8px 0 0;padding-left:18px}
 
 .ilist{list-style:none;margin:12px 0;padding:0;display:flex;flex-direction:column;
   gap:6px}
@@ -28,15 +35,18 @@ aside.dropping{outline:2px dashed var(--accent);outline-offset:-6px}
   border:1px solid var(--line);font-size:11px;white-space:pre-wrap;
   word-break:break-word}
 
-/* A sidebar row is a name that selects plus the export handle. The handle is
+/* A sidebar row is a name that selects plus its actions button (⋮). The button is
    quiet until the row is hovered, focused or selected: it is one control per
-   keyboard in a list that is mostly read. */
+   keyboard in a list that is mostly read. A `.child` row (a module's config/
+   keymap) sits one step in under its keyboard. */
 aside .kbrow{display:flex;align-items:center;gap:2px}
 aside .kbrow > button{flex:1;min-width:0}
+aside .kbrow.child{margin-left:12px;padding-left:6px;border-left:1px solid var(--line)}
 aside .kbrow .xbtn{flex:none;width:26px;padding:6px 0;text-align:center;
   color:var(--muted);font-size:14px;opacity:0}
 aside .kbrow:hover .xbtn,aside .kbrow:focus-within .xbtn,
 aside .kbrow.sel .xbtn{opacity:1}
+aside .kbrow .xbtn .icon{display:block;margin:0 auto}
 aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
 
 /* The export dialog's layer list, two or three columns rather than one long
@@ -48,3 +58,47 @@ aside .kbrow .xbtn:hover{color:var(--accent);background:var(--accent-soft)}
    just nowhere the user can see: `display:none` would leave them unstyled. */
 .offscreen{position:absolute;left:-99999px;top:0;width:4000px;
   pointer-events:none}
+
+/* Settings and keyboards: one label column, inputs filling the rest. */
+.settings h3,.keyboards h3{margin:14px 0 8px;font-size:13px}
+.settings .fields,.keyboards .fields{display:grid;grid-template-columns:max-content 1fr;gap:8px 12px;
+  align-items:center;font-size:12px;color:var(--muted);margin:12px 0}
+.settings .fields .kb.wide,.keyboards .fields .kb.wide{width:100%}
+
+/* Build: the log fills most of the sheet and follows the newest line. */
+.build pre.log{max-height:50vh;white-space:pre-wrap;word-break:break-all}
+.build .files{margin:10px 0 0;font-size:12px}
+.build .files .bar{margin:0}
+.build .files ul{margin:4px 0 0;padding-left:18px}
+.build .files li{margin:3px 0}
+.build .push{margin-left:auto}
+.build .folderbtns{display:flex;gap:6px}
+/* --pending: what the next build writes (targets, and the files it replaces). */
+.build code.next{color:var(--pending);background:var(--pending-soft);
+  border-radius:4px;padding:1px 5px}
+.build code.gone{color:var(--muted);text-decoration:line-through}
+
+/* Flash: the steps, the search status, one Copy button per file. */
+.flash ol.steps{margin:8px 0;padding-left:20px;font-size:13px;line-height:1.5}
+.flash .msg{display:flex;align-items:center;gap:8px}
+.flash .msg:not(.ok):not(.bad){background:var(--line);color:var(--muted)}
+.flash ul.flashlist{list-style:none;padding-left:0}
+.flash ul.flashlist li{display:flex;align-items:center;gap:8px}
+.flash .flashed{color:var(--combo);font-size:12px}
+
+/* Keyboards: the catalog scrolls inside the sheet, so the chosen keyboard's
+   controller and plan stay in view under it. */
+.keyboards .kbpick{max-height:34vh;overflow:auto;border:1px solid var(--line);
+  border-radius:8px;padding:4px}
+.keyboards .irow .push{margin-left:auto}
+.keyboards .fields .bar{margin:0}
+.keyboards .bar .kb.wide{width:min(320px,100%)}
+.kbpick .group:first-child{margin-top:4px}
+
+/* Layer from another keyboard: the variations scroll inside the sheet, like the
+   keyboards catalog, so the picked layer's board stays in view under them. */
+.layerimport .items{max-height:24vh;overflow:auto;border:1px solid var(--line);
+  border-radius:8px;padding:4px;margin-bottom:10px}
+.layerimport .bar .kb.wide{flex:1 1 240px}
+.layerimport .tabs button:disabled{opacity:.4;cursor:not-allowed}
+.lidrop{white-space:nowrap;margin-right:8px}

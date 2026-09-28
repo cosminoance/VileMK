@@ -1,9 +1,9 @@
 import {
-  createContext, useContext, useReducer,
+  createContext, useContext, useEffect, useReducer,
   type Dispatch, type ReactNode,
 } from "react";
 
-import { BLANK, type Mode } from "../lib/drafts";
+import { BLANK, isUnsaved, type Mode } from "../lib/drafts";
 import type { Importing } from "../lib/transfer";
 
 // ---------------------------------------------------------------- the state
@@ -12,10 +12,10 @@ import type { Importing } from "../lib/transfer";
 // panel) are the two things that can occupy the editor area above the menu, and
 // they are mutually exclusive - opening one closes the other. `ptab` is which
 // of the menu tabs below it is showing, and it is independent of both.
-// `reset` is tri-state: null means "not chosen", and the variant bar falls back
-// to whether the keymap binds `&studio_unlock` - the keymaps whose keyboards
-// can end up ignoring the compiled keymap at the positions Studio wrote.
-// Ticking or unticking the box pins it for the session.
+// `reset` holds "include reset" per keymap id once it is clicked. Until then
+// the box shows what the variant's build.yaml has, else whether the keymap
+// binds `&studio_unlock` - the keymaps whose keyboards can end up ignoring the
+// compiled keymap at the positions Studio wrote.
 //
 // `parts` holds the add-on shields ticked in the variant bar, per keymap id and
 // part id. A part not in it falls back to `km.parts[].on`, which the server read
@@ -55,8 +55,10 @@ export interface State {
   picker: boolean;
   ptab: string;
   newLayers: Record<string, { name: string }[]>;
-  reset: boolean | null;
+  reset: Record<string, boolean>;
   parts: Record<string, Record<string, boolean>>;
+  /** The build panel under the variant bar is open. */
+  build: boolean;
 
   activeField: string | null;
   keyVal: string;
@@ -65,21 +67,41 @@ export interface State {
   imp: Importing | null;
 }
 
-export const initialState = (data: any): State => ({
-  data,
-  store: data.custom || {viledance:[], combo:[], modifier:[], layer:[], macro:[]},
-  filter: "",
-  rail: true,
-  id: (data.keymaps[0] || {}).id || null,
-  layer: 0, layout: 0, base: "", nums: true, hot: null,
-  emode: null, drafts: {}, assign: {}, msg: null, dts: null,
-  editing: null, picker: true, ptab: "keyboard",
-  newLayers: {}, reset: null, parts: {},
-  activeField: null, keyVal: "",
-  imp: null,
-});
+// The keymap shown, the sidebar and the key-position toggle survive a reload.
+// Per browser; storage can be missing or refuse, and then the defaults apply.
+const VIEW = "vilemk.view";
+type View = Partial<Pick<State, "id" | "rail" | "nums">>;
+function readView(): View {
+  try { return JSON.parse(localStorage.getItem(VIEW) || "{}") || {}; }
+  catch { return {}; }
+}
+
+export const initialState = (data: any): State => {
+  const v = readView();
+  const known = data.keymaps.some((k: any) => k.id === v.id);
+  return {
+    data,
+    store: data.custom || {viledance:[], combo:[], modifier:[], layer:[], macro:[]},
+    filter: "",
+    rail: v.rail ?? true,
+    id: known ? v.id! : (data.keymaps[0] || {}).id || null,
+    layer: 0, layout: 0, base: "", nums: v.nums ?? true, hot: null,
+    emode: null, drafts: {}, assign: {}, msg: null, dts: null,
+    editing: null, picker: true, ptab: "keyboard",
+    newLayers: {}, reset: {}, parts: {}, build: false,
+    activeField: null, keyVal: "",
+    imp: null,
+  };
+};
 
 export const LIVE = (s: State): boolean => !!s.data.live;
+
+/** Edits that exist only in the page: assignments, new layers, and creation
+ *  panel drafts that are neither blank nor a saved record as opened. */
+export const unsaved = (s: State): boolean =>
+  Object.keys(s.assign).length > 0
+  || Object.values(s.newLayers).some((l) => l.length > 0)
+  || (Object.keys(s.drafts) as Mode[]).some((m) => isUnsaved(s.store, m, s.drafts[m]));
 
 // --------------------------------------------------------------- the actions
 export type Action =
@@ -97,8 +119,9 @@ export type Action =
   | { t: "dts"; dts: string | null }
   | { t: "picker"; on: boolean }
   | { t: "ptab"; tab: string }
-  | { t: "reset"; on: boolean }
+  | { t: "reset"; kmId: string; on: boolean }
   | { t: "part"; kmId: string; id: string; on: boolean }
+  | { t: "build"; on: boolean }
   | { t: "field"; key: string | null }
   | { t: "keyVal"; v: string }
   | { t: "editKey"; pos: number; ptab: string; cur: string }
@@ -109,10 +132,11 @@ export type Action =
   | { t: "closePanel" }
   | { t: "draft"; mode: Mode; draft: any | ((prev: any) => any) }
   | { t: "leavePanel"; mode: Mode; store?: any; msg?: Msg | null }
-  | { t: "addLayer"; kmId: string; name: string; at: number }
+  | { t: "addLayer"; kmId: string; name: string; at: number;
+      assign?: Record<number, string> }
   | { t: "savedVariant"; data: any; store: any; id: string | null;
       kmId: string; msg: Msg | null }
-  | { t: "deletedVariant"; data: any; store: any; kmId: string; msg: Msg | null }
+  | { t: "deletedKeymap"; data: any; store: any; kmId: string; msg: Msg | null }
   | { t: "imp"; imp: Importing | null }
   | { t: "impPatch"; patch: Partial<Importing> }
   | { t: "imported"; data: any; store: any; id: string | null; msg: Msg | null };
@@ -125,21 +149,22 @@ export function reducer(s: State, a: Action): State {
     case "rail": return { ...s, rail: a.on };
 
     case "select":
-      return { ...s, id: a.id, layer: 0, layout: 0, hot: null };
+      return { ...s, id: a.id, layer: 0, layout: 0, hot: null, msg: null };
 
-    case "layer": return { ...s, layer: a.n };
-    case "layout": return { ...s, layout: a.n };
-    case "base": return { ...s, base: a.id };
+    case "layer": return { ...s, layer: a.n, msg: null };
+    case "layout": return { ...s, layout: a.n, msg: null };
+    case "base": return { ...s, base: a.id, msg: null };
     case "nums": return { ...s, nums: a.on };
     case "hot": return { ...s, hot: a.keys };
     case "msg": return { ...s, msg: a.msg };
     case "dts": return { ...s, dts: a.dts };
     case "picker": return { ...s, picker: a.on };
     case "ptab": return { ...s, ptab: a.tab };
-    case "reset": return { ...s, reset: a.on };
+    case "reset": return { ...s, reset: { ...s.reset, [a.kmId]: a.on } };
     case "part":
       return { ...s, parts: { ...s.parts,
                               [a.kmId]: { ...s.parts[a.kmId], [a.id]: a.on } } };
+    case "build": return { ...s, build: a.on };
     case "field": return { ...s, activeField: a.key };
     case "keyVal": return { ...s, keyVal: a.v };
 
@@ -201,10 +226,16 @@ export function reducer(s: State, a: Action): State {
                ...(a.store ? { store: a.store } : {}),
                ...(a.msg !== undefined ? { msg: a.msg } : {}) };
 
-    case "addLayer":
-      return { ...s, layer: a.at,
+    // `assign` is a layer imported from another keymap: its keys arrive as
+    // pending edits on the new layer, exactly as if each had been set by hand.
+    case "addLayer": {
+      const assign = { ...s.assign };
+      if (a.assign && Object.keys(a.assign).length) assign[a.at] = a.assign;
+      else delete assign[a.at];
+      return { ...s, layer: a.at, assign,
                newLayers: { ...s.newLayers,
                  [a.kmId]: [...(s.newLayers[a.kmId] || []), { name: a.name }] } };
+    }
 
     case "savedVariant":
       return { ...s, data: a.data, store: a.store, msg: a.msg,
@@ -220,7 +251,7 @@ export function reducer(s: State, a: Action): State {
       return { ...s, data: a.data, store: a.store, msg: a.msg,
                assign: {}, ...(a.id ? { id: a.id, layer: 0, layout: 0 } : {}) };
 
-    case "deletedVariant": {
+    case "deletedKeymap": {
       const newLayers = { ...s.newLayers };
       delete newLayers[a.kmId];
       return { ...s, data: a.data, store: a.store, msg: a.msg,
@@ -236,6 +267,10 @@ const Ctx = createContext<{ s: State; d: Dispatch<Action> } | null>(null);
 export function StoreProvider({ data, children }:
     { data: any; children: ReactNode }) {
   const [s, d] = useReducer(reducer, data, initialState);
+  useEffect(() => {
+    try { localStorage.setItem(VIEW, JSON.stringify({ id: s.id, rail: s.rail, nums: s.nums })); }
+    catch { /* no storage: the defaults apply next time */ }
+  }, [s.id, s.rail, s.nums]);
   return <Ctx.Provider value={{ s, d }}>{children}</Ctx.Provider>;
 }
 

@@ -1,16 +1,79 @@
 import { useRef, useState } from "react";
 
-import { rowKey, summarise, unresolved, type ImportRow } from "../lib/transfer";
-import { exportVariant, openImport, runImport } from "../state/actions";
+import { saveFile } from "../lib/download";
+import { rowKey, summarise, unresolved, type ImportRow, type Needed } from "../lib/transfer";
+import { exportText, openImport, runImport } from "../state/actions";
 import { useStore } from "../state/store";
+import { Modal } from "./Modal";
+import { Toggle } from "./Toggle";
 
-export function ExportBar({ km }: { km: any }) {
-  const { d } = useStore();
-  if (km.kind !== "variant") return null;
-  // A config or vendor keymap is a file the user already has.
-  return <button className="ghost" onClick={() => exportVariant(d, km)}>
-    Export keymap
-  </button>;
+/** "Export keymap" from a sidebar row's menu: the `.keymap` to hand someone,
+ *  saved through the file picker or copied as text. */
+export function KeymapExportDialog({ km, close }: { km: any; close: () => void }) {
+  const { s, d } = useStore();
+  const [nums, setNums] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const layout = Math.min(s.layout, km.layouts.length - 1);
+  const pending = km.id === s.id && (
+    Object.values(s.assign).some((o: any) => Object.keys(o).length)
+    || !!(s.newLayers[km.id] || []).length);
+
+  const run = (fn: (r: { filename: string; text: string }) =>
+                 Promise<string | null>) => async () => {
+    setBusy(true);
+    try {
+      const said = await fn(await exportText(km, nums, layout));
+      if (said) { d({ t: "msg", msg: { text: said } }); close(); }
+    } catch (e) {
+      d({ t: "msg", msg: { text: (e as Error).message, bad: true } });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={close}>
+      <div className="bar">
+        <h2>Export {km.name}</h2>
+        <span className="path">{km.path}</span>
+      </div>
+
+      {km.kind === "variant" &&
+        <p className="legend">
+          The file carries the VileMK records it uses, so importing it restores
+          them.
+        </p>}
+      {pending &&
+        <div className="warn">unsaved edits are not in the file; Save first to
+          include them</div>}
+
+      <div className="bar">
+        <Toggle checked={nums} onChange={setNums}>
+          include key positions
+        </Toggle>
+        <span className="path">
+          a comment drawing the {km.layouts[layout].display
+            || km.layouts[layout].label} layout with each key's number
+        </span>
+      </div>
+
+      <div className="rowbtns">
+        <button className="act" disabled={busy}
+                onClick={run(async (r) =>
+                  await saveFile(r.filename,
+                    new Blob([r.text], { type: "text/plain;charset=utf-8" }),
+                    [{ description: "ZMK keymap",
+                       accept: { "text/plain": [".keymap"] } }])
+                    ? `saved ${r.filename}` : null)}>Save as…</button>
+        <button className="ghost" disabled={busy}
+                onClick={run(async (r) => {
+                  await navigator.clipboard.writeText(r.text);
+                  return `copied ${r.filename}`;
+                })}>Copy to clipboard</button>
+        <button className="ghost" onClick={close}>Cancel</button>
+      </div>
+    </Modal>
+  );
 }
 
 export function ImportButton() {
@@ -93,71 +156,101 @@ export function ImportDialog() {
   const done = imp.result;
 
   return (
-    <div className="modal" onClick={close}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="bar">
-          <h2>Import {imp.filename}</h2>
-          <span className="path">{imp.board || "unknown keyboard"}</span>
-        </div>
-
-        {!imp.known
-          ? <>
-              <div className="warn">
-                <code>{imp.board}</code> is not in this config repo. Add it with{" "}
-                <code>zmk keyboard add {imp.board}</code> first: without its
-                physical layout there is nothing to import into.
-              </div>
-              <div className="rowbtns"><button className="ghost" onClick={close}>
-                Close
-              </button></div>
-            </>
-          : done
-          ? <>
-              <div className="msg ok">wrote {done.folder || done.wrote}</div>
-              {!!done.renamed.length &&
-                <ul className="ilist">{done.renamed.map((r) =>
-                  <li key={r} className="irow"><span className="nm">{r}</span></li>)}
-                </ul>}
-              {done.errors.map((e) => <div className="warn" key={e}>{e}</div>)}
-              {done.warnings.map((w) => <div className="legend" key={w}>{w}</div>)}
-              {!done.errors.length &&
-                <p className="legend">The checks found no errors.</p>}
-              <div className="rowbtns">
-                <button className="act" onClick={close}>Done</button>
-              </div>
-            </>
-          : <>
-              <label className="bar">
-                <span className="path">save as variant</span>
-                <input className="kb wide" autoComplete="off" value={imp.name}
-                       onChange={(e) => d({ t: "impPatch",
-                                            patch: { name: e.target.value } })} />
-                {imp.taken && <span className="path">overwrites the existing one</span>}
-              </label>
-
-              {imp.records.length
-                ? <ul className="ilist">
-                    {imp.records.map((r) => <Row key={rowKey(r)} row={r} />)}
-                  </ul>
-                : <p className="legend">
-                    This keymap carries no VileMK records, so there is nothing to
-                    restore alongside it.
-                  </p>}
-
-              {imp.error && <div className="msg bad">{imp.error}</div>}
-              <div className="rowbtns">
-                <button className="act" disabled={imp.busy || !!left.length}
-                        onClick={() => runImport(s, d)}>
-                  {imp.busy ? "Importing…" : "Import"}
-                </button>
-                <button className="ghost" onClick={close}>Cancel</button>
-                {!!left.length &&
-                  <span className="path">
-                    decide what to do with {left.length} record(s) first
-                  </span>}
-              </div>
-            </>}
+    <Modal onClose={close}>
+      <div className="bar">
+        <h2>Import {imp.filename}</h2>
+        <span className="path">{imp.board || "unknown keyboard"}</span>
       </div>
-    </div>
+
+      {!imp.known
+        ? <>
+            <MissingBoard board={imp.board} mod={imp.module} />
+            <div className="rowbtns"><button className="ghost" onClick={close}>
+              Close
+            </button></div>
+          </>
+        : done
+        ? <>
+            <div className="msg ok">wrote {done.folder || done.wrote}</div>
+            {!!done.renamed.length &&
+              <ul className="ilist">{done.renamed.map((r) =>
+                <li key={r} className="irow"><span className="nm">{r}</span></li>)}
+              </ul>}
+            {done.errors.map((e) => <div className="warn" key={e}>{e}</div>)}
+            {done.warnings.map((w) => <div className="legend" key={w}>{w}</div>)}
+            {!done.errors.length &&
+              <p className="legend">The checks found no errors.</p>}
+            <div className="rowbtns">
+              <button className="act" onClick={close}>Done</button>
+            </div>
+          </>
+        : <>
+            <label className="bar">
+              <span className="path">save as variant</span>
+              <input className="kb wide" autoComplete="off" value={imp.name}
+                     onChange={(e) => d({ t: "impPatch",
+                                          patch: { name: e.target.value } })} />
+              {imp.taken && <span className="path">overwrites the existing one</span>}
+            </label>
+
+            {imp.records.length
+              ? <ul className="ilist">
+                  {imp.records.map((r) => <Row key={rowKey(r)} row={r} />)}
+                </ul>
+              : <p className="legend">
+                  This keymap carries no VileMK records, so there is nothing to
+                  restore alongside it.
+                </p>}
+
+            {imp.error && <div className="msg bad">{imp.error}</div>}
+            <div className="rowbtns">
+              <button className="act" disabled={imp.busy || !!left.length}
+                      onClick={() => runImport(s, d)}>
+                {imp.busy ? "Importing…" : "Import"}
+              </button>
+              <button className="ghost" onClick={close}>Cancel</button>
+              {!!left.length &&
+                <span className="path">
+                  decide what to do with {left.length} record(s) first
+                </span>}
+            </div>
+          </>}
+    </Modal>
   );
+}
+
+/** Why a keymap cannot be imported yet, and what to add so it can. */
+function MissingBoard({ board, mod }: { board: string; mod: Needed | null }) {
+  const kb = <code>{board || "its keyboard"}</code>;
+  if (!mod)
+    return <>
+      <div className="msg bad">
+        This keymap is for {kb}, which is not added to this project. Without the
+        keyboard's physical layout there is nothing to import into.
+      </div>
+      <p className="legend">
+        The file does not say where the keyboard comes from. Ask whoever sent it
+        which ZMK module has the keyboard, add it under <b>Add a keyboard</b> →{" "}
+        <b>Add a module from GitHub</b>, add the keyboard, and import again.
+      </p>
+    </>;
+  return <>
+    <div className="msg bad">
+      This keymap is for {kb}, from the vendor module <code>{mod.name}</code> (
+      <code>{mod.url}</code>). {!mod.listed
+        ? "This project does not have that module."
+        : !mod.fetched
+        ? "The module is in config/west.yml but has not been fetched."
+        : "The module is here but has no layout for this keyboard."}
+    </div>
+    <p className="legend">
+      {!mod.listed
+        ? <>Open <b>Add a keyboard</b>, fetch <code>{mod.url}</code> at{" "}
+            <code>{mod.ref || "main"}</code> under <b>Add a module from GitHub</b>,
+            add the keyboard, then import the file again.</>
+        : <>Open <b>Add a keyboard</b>, press {mod.fetched ? "Update" : "Fetch"} on{" "}
+            <code>{mod.name}</code> under <b>Modules</b>, then import the file
+            again.</>}
+    </p>
+  </>;
 }

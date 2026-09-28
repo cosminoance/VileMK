@@ -2,11 +2,13 @@
 // trip. The server's reply carries the whole `custom/` store back on every
 // write, which is why so many of these end in one `store` dispatch.
 
-import type { Dispatch } from "react";
+import { createElement, type Dispatch } from "react";
 
+import { ask } from "../components/Confirm";
+import { askLeftover } from "../components/Leftover";
 import { api } from "../lib/api";
-import { readTextFile, saveFile } from "../lib/download";
-import { BOARD_TABS, KIND_OF, recordOf, type Mode } from "../lib/drafts";
+import { readTextFile } from "../lib/download";
+import { BOARD_TABS, KIND_OF, PANEL_TITLES, recordOf, type Mode } from "../lib/drafts";
 import { scopeOf, scopeOn, slugify, byId } from "../lib/keymaps";
 import type { Action, State } from "./store";
 
@@ -41,7 +43,9 @@ export async function previewItem(d: D, mode: Mode, draft: any) {
 export async function deleteItem(d: D, mode: Mode, draft: any) {
   const kind = KIND_OF[mode];
   if (!draft.name) return;
-  if (!confirm(`Delete ${kind} "${draft.name}"?`)) return;
+  if (!await ask({ title: `Delete ${PANEL_TITLES[mode]} "${draft.name}"?`,
+                   body: "Its record is removed from custom/.",
+                   ok: "Delete", danger: true })) return;
   try {
     const r = await api("DELETE", `/api/${kind}/${encodeURIComponent(draft.name)}`);
     d({ t: "leavePanel", mode, store: r.custom,
@@ -86,14 +90,18 @@ export async function previewBinding(d: D, kind: string, rec: any): Promise<stri
 export async function saveVariant(
   s: State, d: D, km: any, over: string | null, typed: string, reset: boolean,
   parts: Record<string, boolean>,
-) {
+): Promise<boolean> {
   const name = over || typed.trim();
-  if (!name)
-    return d({ t: "msg", msg: { text: "give the variant a name", bad: true } });
+  if (!name) {
+    d({ t: "msg", msg: { text: "give the variant a name", bad: true } });
+    return false;
+  }
   if (!over
       && s.data.keymaps.some((k: any) => k.kind === "variant" && k.name === slugify(name))
-      && !confirm(`variants/${slugify(name)}/ already exists. Overwrite it?`))
-    return;
+      && !await ask({ title: `variants/${slugify(name)}/ already exists`,
+                      body: "Overwrite its keymap and build.yaml?",
+                      ok: "Overwrite", danger: true }))
+    return false;
   try {
     const r = await api("POST", "/api/variant",
                         { name, base: km.id, assignments: s.assign,
@@ -113,7 +121,30 @@ export async function saveVariant(
         msg: { text: `wrote ${r.folder || r.wrote}`
                  + (r.build ? " (keymap + build.yaml)" : "")
                  + (r.warnings && r.warnings.length ? " - " + r.warnings.join("; ") : "") } });
-  } catch (e) { d({ t: "msg", msg: bad(e) }); }
+    await showNotices(r);
+    return true;
+  } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
+}
+
+// Warnings the server marks as `custom.Notice`, one dialog each.
+async function showNotices(r: { notices?: { title: string; text: string }[] }) {
+  for (const n of r.notices || []) await ask({ info: true, title: n.title, body: n.text });
+}
+
+// `assign` is filed by layer and position, not by keymap, so pending edits would
+// land on whichever keymap is selected next. Switching asks, and drops them.
+export async function selectKeymap(s: State, d: D, id: string) {
+  const n = Object.values(s.assign).reduce((a, o) => a + Object.keys(o).length, 0);
+  const nl = s.id ? (s.newLayers[s.id] || []).length : 0;
+  if (id !== s.id && s.id && (n || nl)) {
+    const what = [n && `${n} key change(s)`, nl && `${nl} new layer(s)`]
+      .filter(Boolean).join(" and ");
+    if (!await ask({ title: "Discard unsaved changes?",
+                     body: `${what} on this keymap are not saved. Switching drops them.`,
+                     ok: "Discard", danger: true })) return;
+    d({ t: "clearAssign", kmId: s.id });
+  }
+  d({ t: "select", id });
 }
 
 // Deleting is ours to offer only because `variants/` is ours to write: the
@@ -124,28 +155,56 @@ export async function saveVariant(
 // to whatever is left.
 export async function deleteVariant(s: State, d: D, km: any) {
   if (km.kind !== "variant") return;
-  if (!confirm(`Delete variants/${km.name}/ - keymap and build.yaml? `
-               + `This cannot be undone.`)) return;
+  if (!await ask({ title: `Delete variants/${km.name}/?`,
+                   body: "Its keymap and build.yaml are deleted. This cannot be undone.",
+                   ok: "Delete", danger: true })) return;
   try {
     const r = await api("DELETE", `/api/variant/${encodeURIComponent(km.name)}`);
     const fresh = await api("GET", "/api/state");
-    d({ t: "deletedVariant", data: fresh,
+    d({ t: "deletedKeymap", data: fresh,
         store: fresh.custom || r.custom || s.store, kmId: km.id,
         msg: { text: `deleted variants/${km.name}/` } });
   } catch (e) { d({ t: "msg", msg: bad(e) }); }
 }
 
+// A vendor default's Delete takes its keyboard out of the project: the
+// build.yaml entries, its `config/` files, and its module once nothing else in
+// build.yaml comes from it (`keyboards.remove_vendor()`). The server refuses
+// while a variant builds the keyboard, and names them in `variants`.
+export async function deleteVendor(s: State, d: D, km: any) {
+  const b = km.board;
+  if (!b) return;
+  const modName = s.data.module_names?.[b.source] || b.source;
+  const mod = b.source === "zmk" ? ""
+    : `, and the ${modName} module is removed once no other keyboard uses it`;
+  if (!await ask({ title: `Delete ${km.name}?`, ok: "Delete", danger: true,
+                   body: `Its entries leave build.yaml${mod}. `
+                     + "You can add it again with Add a keyboard." })) return;
+  try {
+    const r = await api("DELETE", `/api/vendor/${encodeURIComponent(b.id)}`
+                                  + `?source=${encodeURIComponent(b.source)}`);
+    const fresh = await api("GET", "/api/state");
+    d({ t: "deletedKeymap", data: fresh, store: fresh.custom || s.store, kmId: km.id,
+        msg: { text: `deleted ${km.name}` + (r.module ? ` and module ${modName}` : "") } });
+    if (r.left?.length) await askLeftover(modName, r.left);
+  } catch (e) {
+    const used: string[] = (e as any).body?.variants || [];
+    if (!used.length) return d({ t: "msg", msg: bad(e) });
+    await ask({ info: true, title: `${km.name} is still used`,
+                body: createElement("div", null,
+                  "Delete these variations first:",
+                  createElement("ul", null,
+                    used.map((n) => createElement("li", { key: n }, n)))) });
+  }
+}
+
 // ------------------------------------------------------------ share and import
 
-export async function exportVariant(d: D, km: any) {
-  try {
-    const r = await api("GET", `/api/export/${encodeURIComponent(km.name)}`);
-    const ok = await saveFile(r.filename,
-      new Blob([r.text], { type: "text/plain;charset=utf-8" }),
-      [{ description: "ZMK keymap", accept: { "text/plain": [".keymap"] } }]);
-    if (ok) d({ t: "msg", msg: { text: `exported ${r.filename}` } });
-  } catch (e) { d({ t: "msg", msg: bad(e) }); }
-}
+/** The text to share for any listed keymap; a variant carries its records. */
+export const exportText = (km: any, positions: boolean, layout: number) =>
+  api<{ filename: string; text: string }>("GET",
+    `/api/export?id=${encodeURIComponent(km.id)}`
+    + (positions ? `&positions=1&layout=${layout}` : ""));
 
 export async function openImport(d: D, file: File) {
   try {
@@ -154,7 +213,7 @@ export async function openImport(d: D, file: File) {
                         { text, filename: file.name });
     d({ t: "imp", imp: {
       filename: file.name, text,
-      board: r.board, known: !!r.known,
+      board: r.board, known: !!r.known, module: r.module || null,
       name: r.name, taken: !!r.taken,
       records: r.records || [],
       choices: {}, renames: {}, busy: false, error: null, result: null,
@@ -179,7 +238,9 @@ export async function runImport(s: State, d: D) {
     d({ t: "imported", data: fresh, store: fresh.custom || r.custom || s.store,
         id: created ? created.id : null,
         msg: { text: `imported into ${r.folder || r.wrote}` } });
+    await showNotices(r);
   } catch (e) {
     d({ t: "impPatch", patch: { busy: false, error: (e as Error).message } });
   }
 }
+

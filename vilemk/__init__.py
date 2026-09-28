@@ -1,4 +1,4 @@
-"""VileMK - read, check and view the ZMK keymaps in a zmk-cli config repo.
+"""VileMK - design, check and build ZMK keymaps.
 
 Two layers, and the import direction only ever points down:
 
@@ -17,7 +17,7 @@ import os
 
 __version__ = "0.1.0"
 
-# The VileMK checkout - one level above this package. `custom/` and `variants/`
-# live here, beside the source rather than inside it. Anything that needs to
+# The VileMK checkout - one level above this package. `config/`, `.zmk/`,
+# `custom/` and `variants/` live here, beside the source rather than inside it. Anything that needs to
 # reach them takes it from here; deriving it per-module is how it drifts.
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

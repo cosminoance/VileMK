@@ -1,0 +1,28 @@
+/* Evening in Kyoto. Source: ~/git/pixeldrama-protanomaly/PALETTE.md (the
+   ANSI palette and the chrome palette). Defines the palette contract in
+   docs/theming/README.md; tokens.css reads only these names. */
+:root,[data-theme="evening-in-kyoto"]{
+  color-scheme:dark;
+
+  /* Surfaces, darkest to lightest. bg and selection are PALETTE.md specials;
+     the steps between are neutral greys picked for this app. */
+  --pal-bg:#1a1a1a; --pal-bg-raised:#212121; --pal-bg-key:#262626;
+  --pal-line:#2e2e2e; --pal-selection:#343434; --pal-line-strong:#3a3a3a;
+
+  /* Text. fg-dim sits between comment and fg, for secondary text. */
+  --pal-fg:#c4c5b5; --pal-fg-bright:#f6f6ef; --pal-fg-dim:#96927f;
+  --pal-comment:#625e4c;
+
+  /* ANSI hues by slot. Kyoto has no true yellow: both yellows are orange. */
+  --pal-red:#9f7887; --pal-green:#8f9f78; --pal-yellow:#fa8419;
+  --pal-yellow-bright:#ff9f43; --pal-blue:#4c8ce6; --pal-magenta:#9e7cc0;
+  --pal-cyan:#58d1eb;
+
+  /* Chrome hues, each with its dim companion. */
+  --pal-rose:#9f7887; --pal-rose-dim:#947a82;
+  --pal-sage:#8f9f78; --pal-sage-dim:#8a9278;
+  --pal-orange:#b77a4f; --pal-orange-dim:#a8744f;
+  --pal-teal:#7fa8a8; --pal-teal-dim:#789292;
+  --pal-amber:#b89a68; --pal-amber-dim:#9a815d;
+  --pal-cream:#f1e9df;
+}

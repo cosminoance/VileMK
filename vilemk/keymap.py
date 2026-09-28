@@ -1,12 +1,13 @@
-"""Read the ZMK keymaps in a config repo and turn them into plain data.
+"""Read the ZMK keymaps in the project and turn them into plain data.
 
 Parsing only: devicetree in, dicts and lists out. Nothing here knows that a
 web page exists — rendering lives in `vilemk.webui`. `collect_data()` is the
 one entry point both the static builder and the live server call.
 
 Sources, in the order they are discovered: vendor default keymaps from the
-read-only `.zmk/` CLI cache, your own `config/*.keymap`, and any saved
-variations in `variants/*.keymap`. Each one's physical layout is resolved
+fetched board data in `.zmk/`, and saved variations in `variants/`.
+`config/` is not read: it holds settings, and a variant build names its own
+keymap. Each one's physical layout is resolved
 through `vilemk.keypos`, so key positions are the real ones.
 """
 
@@ -16,7 +17,7 @@ import datetime
 import os
 import re
 
-from . import PROJECT_DIR, keypos
+from . import keypos
 from .keypos import (binding_tokens, funclike_defines, node_bodies, prop_value,
                      strip_comments)
 
@@ -354,13 +355,6 @@ class BuildEntry:
         m = KEYMAP_FILE_RE.search(self.get("cmake-args") or "")
         return _yaml_unquote(m.group(1)) if m else None
 
-    def keymap_path(self):
-        """That value as a repo-relative path, or None."""
-        raw = self.keymap_file()
-        if raw is None:
-            return None
-        return os.path.normpath(WORKSPACE_RE.sub("", raw).lstrip("/")) or None
-
     def artifact(self) -> str:
         """What the .uf2 inside firmware.zip ends up called."""
         return self.get("artifact-name") or "-".join(
@@ -472,14 +466,11 @@ def discover(zmk_dir, include=(), take_all=False):
     """-> [(kind, path)] for every keymap worth showing."""
     found = []
 
-    # `config/` and `keymaps/` are in the ZMK config repo (we chdir'd there);
-    # `variants/` is ours and lives in the VileMK checkout, so look in both places.
+    # Relative to the project, which every command chdirs into.
     # A variant is a folder - `variants/<name>/<name>.keymap` beside the
     # `build.yaml` that builds it - so look one level down as well as flat.
     # Flat `.keymap` files are what earlier versions wrote, and still count.
-    for base, kind in (("config", "config"), ("variants", "variant"),
-                       ("keymaps", "variant"),
-                       (os.path.join(PROJECT_DIR, "variants"), "variant")):
+    for base, kind in (("variants", "variant"), ("keymaps", "variant")):
         if not os.path.isdir(base):
             continue
         for fn in sorted(os.listdir(base)):
@@ -498,7 +489,6 @@ def discover(zmk_dir, include=(), take_all=False):
         wanted |= {re.sub(r"_(left|right)$", "", n) for n in wanted}
 
     for root in (os.path.join(zmk_dir, "modules"),
-                 os.path.join(zmk_dir, "config"),
                  os.path.join(zmk_dir, "zmk", "app", "boards")):
         if not os.path.isdir(root):
             continue
@@ -507,6 +497,8 @@ def discover(zmk_dir, include=(), take_all=False):
             dirs[:] = [d for d in dirs if d not in (".git", "build")]
             for fn in sorted(files):
                 if not fn.endswith(".keymap"):
+                    continue
+                if fn[:-len(".keymap")] in UTILITY_SHIELDS:
                     continue
                 path = os.path.join(base, fn)
                 if in_tree and not take_all:
@@ -523,6 +515,37 @@ def discover(zmk_dir, include=(), take_all=False):
             seen.add(real)
             out.append((kind, path))
     return out
+
+
+def vendor_note(path):
+    """A module can ship two keymaps for one keyboard: the board's own fallback,
+    and the one its `config/` builds the vendor's released firmware from."""
+    return ("vendor's firmware" if "config" in path.split(os.sep)[:-1]
+            else "board default")
+
+
+def _tree(entries, zmk_dir):
+    """A vendor keymap that is a catalog keyboard's own gets `board` ({id, source},
+    what removing it takes out). A module's other keymaps of the same name, such as
+    the one in its `config/`, get `parent`: that keyboard's entry id."""
+    from . import workspace
+
+    own = {os.path.normpath(os.path.join(e["dir"], e["id"] + ".keymap")): e
+           for e in workspace.catalog(zmk_dir) if e["keymap"]}
+    mods = os.path.normpath(os.path.join(zmk_dir, "modules")) + os.sep
+    parents = {}
+    for e in entries:
+        c = own.get(os.path.normpath(e["path"])) if e["kind"] == "vendor" else None
+        e["board"] = {"id": c["id"], "source": c["source"]} if c else None
+        e["parent"] = None
+        if c:
+            parents[(c["source"], c["id"])] = e["id"]
+    for e in entries:
+        path = os.path.normpath(e["path"])
+        if e["kind"] != "vendor" or e["board"] or not path.startswith(mods):
+            continue
+        source = path[len(mods):].split(os.sep)[0]
+        e["parent"] = parents.get((source, e["name"]))
 
 
 def layout_payload(layout):
@@ -580,13 +603,15 @@ def collect_data(args):
             "id": f"{kind}:{path}",
             "name": stem,
             "kind": kind,
+            "note": vendor_note(path) if kind == "vendor" else "",
             "path": path,
             "keyboard": _name,
             "layouts": opts,
             **data,
         })
 
-    order = {"config": 0, "variant": 1, "vendor": 2}
+    _tree(entries, args.zmk)
+    order = {"variant": 0, "vendor": 1}
     entries.sort(key=lambda e: (order.get(e["kind"], 3), e["name"], e["path"]))
     return {
         "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),

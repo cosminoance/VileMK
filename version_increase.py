@@ -43,7 +43,10 @@ def write(version: str) -> None:
 
 
 def main() -> None:
-    if "--current" in sys.argv[1:]:
+    args = sys.argv[1:]
+    if args not in ([], ["--current"]):
+        sys.exit(__doc__)
+    if args:
         print(read())
         return
     version = bump(read())

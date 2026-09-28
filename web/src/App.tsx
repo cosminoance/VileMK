@@ -1,20 +1,36 @@
 import { useEffect, useState } from "react";
 
 import { getState } from "./lib/api";
+import { byId } from "./lib/keymaps";
 import { KeymapView } from "./components/KeymapView";
 import { Sidebar } from "./components/Sidebar";
 import { VersionChip } from "./components/Changelog";
+import { ConfirmHost } from "./components/Confirm";
+import { SettingsChip } from "./components/Settings";
 import { ImportDialog } from "./components/Transfer";
-import { LIVE, StoreProvider, useStore } from "./state/store";
+import { LIVE, StoreProvider, unsaved, useStore } from "./state/store";
 import logo from "../../vilemk/webui/assets/logo.png";
 
 function Shell() {
   const { s } = useStore();
+  // Edits live only in the page until a save, so a reload or a closed tab asks.
+  const dirty = unsaved(s);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  // The tab names the keymap, marked while it has unsaved edits.
+  const name = byId(s.data.keymaps, s.id)?.name;
+  useEffect(() => {
+    document.title = (dirty ? "\u2022 " : "") + (name ? `${name} \u00b7 VileMK` : "VileMK");
+  }, [dirty, name]);
   return <>
     <header>
       <span className="ident">
         <span className="brand"><img src={logo} alt="VileMK" /></span>
-        <VersionChip />
+        <span className="chips"><VersionChip /><SettingsChip /></span>
       </span>
       <span className="meta">
         {s.data.repo_path} &middot; generated {s.data.generated} &middot;{" "}
@@ -26,6 +42,7 @@ function Shell() {
       <KeymapView />
     </div>
     <ImportDialog />
+    <ConfirmHost />
   </>;
 }
 
@@ -46,7 +63,7 @@ export function App() {
       </main>
     );
   if (!data)
-    return <main className="boot"><h1>VileMK</h1><p>Reading the config repo…</p></main>;
+    return <main className="boot"><h1>VileMK</h1><p>Reading the project…</p></main>;
 
   return <StoreProvider data={data}><Shell /></StoreProvider>;
 }

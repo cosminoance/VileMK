@@ -1,25 +1,41 @@
 import { useState } from "react";
 
-import { openImport } from "../state/actions";
+import { openImport, selectKeymap } from "../state/actions";
 import { LIVE, useStore } from "../state/store";
-import { ExportButton } from "./Export";
+import { KeymapMenu } from "./KeymapMenu";
+import { KeyboardsButton } from "./Keyboards";
+import { RepoFooter } from "./RepoFooter";
 import { ImportButton } from "./Transfer";
 
 const KINDS: Record<string, string> = {
-  config: "In this config",
   variant: "Saved variations",
   vendor: "Vendor defaults",
 };
+
+/** A keymap with a `parent` (a module's `config/` keymap) goes right under
+ *  that keyboard's own keymap, one level in; with its parent filtered out it
+ *  stands alone. */
+function tree(rows: any[]) {
+  const shown = new Set(rows.map((k) => k.id));
+  const out: any[] = [];
+  for (const k of rows) {
+    if (k.parent && shown.has(k.parent)) continue;
+    out.push(k);
+    for (const c of rows)
+      if (c.parent === k.id) out.push({ ...c, child: true });
+  }
+  return out;
+}
 
 export function Sidebar() {
   const { s, d } = useStore();
   const [over, setOver] = useState(false);
   const q = s.filter.toLowerCase();
-  const groups = (["config", "variant", "vendor"] as const)
+  const groups = (["variant", "vendor"] as const)
     .map((kind) => ({
       kind,
-      rows: s.data.keymaps.filter((k: any) => k.kind === kind &&
-        (k.name.toLowerCase().includes(q) || k.path.toLowerCase().includes(q))),
+      rows: tree(s.data.keymaps.filter((k: any) => k.kind === kind &&
+        (k.name.toLowerCase().includes(q) || k.path.toLowerCase().includes(q)))),
     }))
     .filter((g) => g.rows.length);
 
@@ -37,29 +53,32 @@ export function Sidebar() {
   return (<>
     <aside id="kblist" className={over ? "dropping" : ""} {...drop}>
       <input placeholder="filter keyboards…" autoComplete="off" value={s.filter}
-             onChange={(e) => d({ t: "filter", v: e.target.value })} />
-      {LIVE(s) && <ImportButton />}
-      <div>
+             onChange={(e) => d({ t: "filter", v: e.target.value })}
+             onKeyDown={(e) => { if (e.key === "Escape") d({ t: "filter", v: "" }); }} />
+      {LIVE(s) && <><KeyboardsButton /><ImportButton /></>}
+      <div className="kblists">
         {groups.length
           ? groups.map((g) => (
               <div key={g.kind}>
                 <div className="group">{KINDS[g.kind]}</div>
-                {/* The row is a pair: the name selects, the ⤓ beside it
-                    exports that keymap as a picture without opening it. */}
+                {/* The row is a pair: the name selects, the settings menu beside
+                    it exports or deletes without opening the keymap. */}
                 {g.rows.map((k: any) => (
                   <div key={k.id}
-                       className={"kbrow" + (k.id === s.id ? " sel" : "")}>
+                       className={"kbrow" + (k.child ? " child" : "")
+                                  + (k.id === s.id ? " sel" : "")}>
                     <button className={k.id === s.id ? "sel" : ""}
-                            onClick={() => d({ t: "select", id: k.id })}>
-                      {k.name}<small>{k.path}</small>
+                            onClick={() => selectKeymap(s, d, k.id)}>
+                      {k.name}<small title={k.path}>{k.note ? k.note + " · " : ""}{k.path}</small>
                     </button>
-                    <ExportButton km={k} />
+                    <KeymapMenu km={k} />
                   </div>
                 ))}
               </div>
             ))
           : <div className="group">no matches</div>}
       </div>
+      <RepoFooter />
     </aside>
     {/* The handle sits on the panel's own border rather than in the header, so
         it reads as belonging to the panel. It is outside `aside` because the

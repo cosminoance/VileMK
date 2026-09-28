@@ -1,8 +1,7 @@
 # Task runner - the `scripts` block of a package.json.
 # Every target runs the scripts in place; nothing here needs to be installed
-# first. The ZMK config repo is found by the scripts themselves (--repo,
-# $ZMK_CONFIG, a config/west.yml above the cwd, or `zmk config user.home`),
-# so these work from any directory.
+# first. Every command works on this checkout: config/, build.yaml and .zmk/
+# live beside the code.
 #
 #   make            # check every keymap, then build the app and serve it
 #   make design     # kill any stale instance, then start the local backend
@@ -13,6 +12,17 @@
 #   make kill       # just kill a stale server, without starting a new one
 #   make check      # validation only (build.yaml, then every keymap)
 #   make pos        # print key-position maps
+#   make zmk        # fetch ZMK's board data at the ref in config/west.yml
+#                   # and pin the commit (ARGS="--ref v0.3" to switch)
+#   make module ARGS=<name>
+#                   # fetch a keyboard module listed in config/west.yml
+#                   # into .zmk/modules/<name>/ and pin the commit, unless
+#                   # it breaks a variant (ARGS="<name> --overwrite <sha>")
+#   make module ARGS="add <github-url> --ref main"
+#                   # add a module that is not in west.yml yet
+#   make firmware ARGS=<variant>
+#                   # build a variant's firmware in Docker, into
+#                   # variants/<variant>/firmware/
 #   make install    # put vilemk-* on your PATH
 #   make clean
 
@@ -21,7 +31,7 @@ NPM ?= npm
 # Extra flags, e.g.  make check ARGS="config/corne.keymap"
 ARGS ?=
 
-.PHONY: all design kill check web webdev pos install uninstall build clean help
+.PHONY: all design kill check web webdev pos zmk module firmware install uninstall build clean help
 .DEFAULT_GOAL := all
 
 all: check design
@@ -55,12 +65,28 @@ kill:
 
 # build.yaml first - which halves get built, from which keymap, with which
 # parts - then every keymap in config/ and variants/. Read-only, like
-# everything here: it prints the line to add, you edit and push.
+# everything here: it prints the line to add, you edit.
 check:
 	$(PY) -m vilemk.check $(ARGS)
 
 pos:
 	$(PY) -m vilemk.keypos $(ARGS)
+
+# Writes .zmk/zmk/ and config/west.yml, nothing else. With no west.yml yet it
+# starts one at ZMK v0.3, which is how a fresh checkout gets its board data.
+zmk:
+	$(PY) -m vilemk.workspace update zmk $(ARGS)
+
+# Writes .zmk/modules/<name>/ and its pin in config/west.yml. A bare name updates
+# a module listed there, after checking the variants still build against it;
+# `add <url>` and `remove <name>` pass straight through.
+module:
+	$(PY) -m vilemk.workspace $(if $(filter add remove,$(firstword $(ARGS))),,update) $(ARGS)
+
+# Needs Docker. The west workspace lives in the `vilemk-zmk` volume; the first
+# run pulls the build image and all of ZMK and Zephyr.
+firmware:
+	$(PY) -m vilemk.firmware $(ARGS)
 
 install:
 	uv tool install --editable . || pip install -e .
