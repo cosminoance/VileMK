@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { saveFile } from "../lib/download";
 import { rowKey, summarise, unresolved, type ImportRow, type Needed } from "../lib/transfer";
 import { exportText, openImport, runImport } from "../state/actions";
-import { useStore } from "../state/store";
+import { layerEdits, useStore } from "../state/store";
 import { Modal } from "./Modal";
 import { Toggle } from "./Toggle";
 
@@ -16,7 +16,7 @@ export function KeymapExportDialog({ km, close }: { km: any; close: () => void }
   const layout = Math.min(s.layout, km.layouts.length - 1);
   const pending = km.id === s.id && (
     Object.values(s.assign).some((o: any) => Object.keys(o).length)
-    || !!(s.newLayers[km.id] || []).length);
+    || !!layerEdits(s, km.id));
 
   const run = (fn: (r: { filename: string; text: string }) =>
                  Promise<string | null>) => async () => {

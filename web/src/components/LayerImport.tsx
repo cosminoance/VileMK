@@ -37,6 +37,29 @@ export function AddLayerButton({ km }: { km: any }) {
   </>;
 }
 
+/** Marks layer `at` for deletion, or takes the mark back. Nothing moves until
+ *  the save, so `s.assign` keeps its indices. `left` is how many layers are not
+ *  marked: the last one cannot go. */
+export function DeleteLayerButton({ km, at, left }:
+    { km: any; at: number; left: number }) {
+  const { s, d } = useStore();
+  const on = (s.dropLayers[km.id] || []).includes(at);
+  return <>
+    <button className={on ? "ghost sm" : "ghost sm danger"}
+            disabled={!on && left <= 1}
+            onClick={() => d({ t: "dropLayer", kmId: km.id, n: at, on: !on })}>
+      {on ? "Restore layer" : "Delete layer"}
+    </button>
+    <Help label="what deleting a layer does">
+      The layer goes when you save. The layers after it move down one, and keys,
+      combos and conditional layers in this keymap that name them are renumbered.
+      Keys that switch to the deleted layer become &amp;none; a layer-tap keeps its
+      tap. Saved layer-tap and combo entries are shared between keymaps and keep
+      their numbers.
+    </Help>
+  </>;
+}
+
 /** The saved variations a layer can be copied from: every one but `km`. */
 const donors = (keymaps: any[], km: any): any[] =>
   keymaps.filter((k) => k.kind === "variant" && k.id !== km.id);

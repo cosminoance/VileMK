@@ -19,7 +19,8 @@ export function VariantBar({ km }: { km: any }) {
   const n = Object.values(s.assign)
     .reduce((a, o) => a + Object.keys(o).length, 0);
   const nl = (s.newLayers[km.id] || []).length;
-  const dirty = n || nl;
+  const dl = (s.dropLayers[km.id] || []).length;
+  const dirty = n || nl || dl;
   const choices = choicesBody(buildChoices(s, km));
   // Text typed into the key editor but not applied goes into the save, as Enter
   // would have put it there. Blank text, or what the key already holds, does not.
@@ -44,7 +45,7 @@ export function VariantBar({ km }: { km: any }) {
     if (saving.current || document.querySelector(".modal")) return;
     if (!own) return setAsking(true);
     const st = withKey();
-    if (!Object.keys(st.assign).length && !nl && !choicesChanged(st, km))
+    if (!Object.keys(st.assign).length && !nl && !dl && !choicesChanged(st, km))
       return d({ t: "msg", msg: { text: "nothing to save" } });
     saving.current = true;
     await save(km.name, km.name, st);
@@ -67,6 +68,7 @@ export function VariantBar({ km }: { km: any }) {
       {!!dirty &&
         <span className="path">
           {n} pending change(s){nl ? `, ${nl} new layer(s)` : ""}
+          {dl ? `, ${dl} layer(s) to delete` : ""}
         </span>}
       {own
         ? <Dropdown label="Save" items={[
@@ -82,7 +84,7 @@ export function VariantBar({ km }: { km: any }) {
         <button className="ghost danger"
                 onClick={() => deleteVariant(s, d, km)}>Delete variant</button>}
     </div>
-    <BuildPanel km={km} dirty={n + nl} />
+    <BuildPanel km={km} dirty={n + nl + dl} />
     {s.msg && <Notice msg={s.msg} close={() => d({ t: "msg", msg: null })} />}
     {asking &&
       <SaveAsSheet start={slugify(km.name) + (own ? "_2" : "_custom")} from={km.name}
