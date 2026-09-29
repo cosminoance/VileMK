@@ -10,7 +10,8 @@
    stay the natural size, which is what the PNG export reads. */
 .board{display:block;margin:0 auto 18px;max-width:100%;height:auto}
 /* View options for the board, drawn as its caption rather than as a bar control. */
-.boardopts{display:flex;margin:-6px 0 8px;font-size:12px;color:var(--muted)}
+.boardopts{display:flex;align-items:center;margin:-6px 0 8px;font-size:12px;color:var(--muted)}
+.boardopts .end{margin-left:auto;display:flex;align-items:center}
 .boardopts .toggle{border:0;background:none;padding:0;color:inherit}
 .boardopts .toggle:has(input:checked){color:var(--ink)}
 .k rect{fill:var(--key);stroke:var(--key-line);stroke-width:1}

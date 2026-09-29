@@ -499,6 +499,7 @@ class Handler(BaseHTTPRequestHandler):
                        for k, d in (rec.get("assignments") or {}).items()}
         new_layers = [{"name": nl.get("name") or ""}
                       for nl in (rec.get("new_layers") or [])]
+        drop = [int(i) for i in (rec.get("drop_layers") or [])]
         data = keymap.collect_data(Args())
         km = next((k for k in data["keymaps"] if k["id"] == base_id), None)
         if km is None:
@@ -521,7 +522,7 @@ class Handler(BaseHTTPRequestHandler):
                 base_text, expanded, assignments,
                 store["viledance"], store["combo"], store["layer"],
                 macros=store["macro"], rows=rows,
-                new_layers=new_layers, scope=scope)
+                new_layers=new_layers, scope=scope, drop=drop)
             header = (f"// zmk-keyboard: {km.get('keyboard') or ''}\n"
                       f"// variant of {km['path']} - written by VileMK\n")
             if not text.lstrip().startswith("// zmk-keyboard"):

@@ -74,6 +74,9 @@ label.toggle{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
 .tabs button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;
   background:var(--panel);color:var(--ink);cursor:pointer;font:inherit}
 .tabs button.sel{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+/* Marked for deletion; it stays until the save so layer indices hold. */
+.tabs button.gone{text-decoration:line-through;color:var(--muted)}
+.tabs button.gone.sel{color:var(--on-accent)}
 
 /* The version chip sits under the wordmark and opens the changelog. Styled as
    a link rather than a button so it reads as one; the `?` bubble is the only

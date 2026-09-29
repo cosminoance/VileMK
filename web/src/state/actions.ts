@@ -10,7 +10,7 @@ import { api } from "../lib/api";
 import { readTextFile } from "../lib/download";
 import { BOARD_TABS, KIND_OF, PANEL_TITLES, recordOf, type Mode } from "../lib/drafts";
 import { scopeOf, scopeOn, slugify, byId } from "../lib/keymaps";
-import type { Action, State } from "./store";
+import { layerEdits, type Action, type State } from "./store";
 
 type D = Dispatch<Action>;
 const bad = (e: unknown) => ({ text: (e as Error).message, bad: true });
@@ -107,7 +107,8 @@ export async function saveVariant(
     const r = await api("POST", "/api/variant",
                         { name, base: km.id, assignments: s.assign,
                           scope: scopeOf(km), ...choices,
-                          new_layers: s.newLayers[km.id] || [] });
+                          new_layers: s.newLayers[km.id] || [],
+                          drop_layers: s.dropLayers[km.id] || [] });
     // Pull the fresh keymap list so the new file shows up in "Saved variations"
     // without a page reload, and jump straight to it - matching by filename
     // since `r.wrote` is project-relative while a keymap's `id` carries the
@@ -136,9 +137,9 @@ async function showNotices(r: { notices?: { title: string; text: string }[] }) {
 // land on whichever keymap is selected next. Switching asks, and drops them.
 export async function selectKeymap(s: State, d: D, id: string) {
   const n = Object.values(s.assign).reduce((a, o) => a + Object.keys(o).length, 0);
-  const nl = s.id ? (s.newLayers[s.id] || []).length : 0;
+  const nl = layerEdits(s, s.id);
   if (id !== s.id && s.id && (n || nl)) {
-    const what = [n && `${n} key change(s)`, nl && `${nl} new layer(s)`]
+    const what = [n && `${n} key change(s)`, nl && `${nl} layer change(s)`]
       .filter(Boolean).join(" and ");
     if (!await ask({ title: "Discard unsaved changes?",
                      body: `${what} on this keymap are not saved. Switching drops them.`,

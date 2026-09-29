@@ -67,6 +67,8 @@ export interface State {
   picker: boolean;
   ptab: string;
   newLayers: Record<string, { name: string }[]>;
+  /** Layer indices marked for deletion, per keymap id, until the next save. */
+  dropLayers: Record<string, number[]>;
   reset: Record<string, boolean>;
   parts: Record<string, Record<string, boolean>>;
   prep: Record<string, Prep>;
@@ -101,7 +103,7 @@ export const initialState = (data: any): State => {
     layer: 0, layout: 0, base: "", nums: v.nums ?? true, hot: null,
     emode: null, drafts: {}, assign: {}, msg: null, dts: null,
     editing: null, picker: true, ptab: "keyboard",
-    newLayers: {}, reset: {}, parts: {}, prep: {}, build: false,
+    newLayers: {}, dropLayers: {}, reset: {}, parts: {}, prep: {}, build: false,
     activeField: null, keyVal: "",
     imp: null,
   };
@@ -109,11 +111,15 @@ export const initialState = (data: any): State => {
 
 export const LIVE = (s: State): boolean => !!s.data.live;
 
-/** Edits that exist only in the page: assignments, new layers, and creation
- *  panel drafts that are neither blank nor a saved record as opened. */
+/** New layers plus layers marked for deletion on keymap `id`. */
+export const layerEdits = (s: State, id: string | null): number =>
+  id ? (s.newLayers[id] || []).length + (s.dropLayers[id] || []).length : 0;
+
+/** Edits that exist only in the page: assignments, new or deleted layers, and
+ *  creation panel drafts that are neither blank nor a saved record as opened. */
 export const unsaved = (s: State): boolean =>
   Object.keys(s.assign).length > 0
-  || Object.values(s.newLayers).some((l) => l.length > 0)
+  || Object.keys({ ...s.newLayers, ...s.dropLayers }).some((id) => layerEdits(s, id) > 0)
   || (Object.keys(s.drafts) as Mode[]).some((m) => isUnsaved(s.store, m, s.drafts[m]));
 
 // --------------------------------------------------------------- the actions
@@ -150,6 +156,7 @@ export type Action =
   | { t: "leavePanel"; mode: Mode; store?: any; msg?: Msg | null }
   | { t: "addLayer"; kmId: string; name: string; at: number;
       assign?: Record<number, string> }
+  | { t: "dropLayer"; kmId: string; n: number; on: boolean }
   | { t: "savedVariant"; data: any; store: any; id: string | null;
       kmId: string; msg: Msg | null }
   | { t: "deletedKeymap"; data: any; store: any; kmId: string; msg: Msg | null }
@@ -220,7 +227,8 @@ export function reducer(s: State, a: Action): State {
 
     case "clearAssign":
       return { ...s, assign: {}, msg: null,
-               newLayers: { ...s.newLayers, [a.kmId]: [] } };
+               newLayers: { ...s.newLayers, [a.kmId]: [] },
+               dropLayers: { ...s.dropLayers, [a.kmId]: [] } };
 
     // `+ New …`, a card's pencil and Resume all land here. Drafts are per
     // mode, so opening one kind never touches another kind's half-typed one.
@@ -266,9 +274,20 @@ export function reducer(s: State, a: Action): State {
                  [a.kmId]: [...(s.newLayers[a.kmId] || []), { name: a.name }] } };
     }
 
+    // A marked layer stays on screen, struck through, so the indices `assign`
+    // is filed by do not move until the save renumbers everything at once.
+    case "dropLayer": {
+      const cur = (s.dropLayers[a.kmId] || []).filter((n) => n !== a.n);
+      return { ...s, dropLayers: { ...s.dropLayers,
+                 [a.kmId]: a.on ? [...cur, a.n].sort((x, y) => x - y) : cur },
+               ...(a.on && s.layer === a.n
+                 ? { editing: null, activeField: null, keyVal: "" } : {}) };
+    }
+
     case "savedVariant":
       return { ...s, data: a.data, store: a.store, msg: a.msg,
                assign: {}, newLayers: { ...s.newLayers, [a.kmId]: [] },
+               dropLayers: { ...s.dropLayers, [a.kmId]: [] },
                ...(a.id ? { id: a.id, layer: 0 } : {}) };
 
     case "imp": return { ...s, imp: a.imp };
@@ -281,10 +300,11 @@ export function reducer(s: State, a: Action): State {
                assign: {}, ...(a.id ? { id: a.id, layer: 0, layout: 0 } : {}) };
 
     case "deletedKeymap": {
-      const newLayers = { ...s.newLayers };
+      const newLayers = { ...s.newLayers }, dropLayers = { ...s.dropLayers };
       delete newLayers[a.kmId];
+      delete dropLayers[a.kmId];
       return { ...s, data: a.data, store: a.store, msg: a.msg,
-               assign: {}, newLayers,
+               assign: {}, newLayers, dropLayers,
                id: (a.data.keymaps[0] || {}).id || null, layer: 0, layout: 0 };
     }
   }

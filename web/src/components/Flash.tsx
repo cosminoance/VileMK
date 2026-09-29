@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
 import { choicesChanged } from "../lib/keymaps";
-import type { State } from "../state/store";
+import { layerEdits, type State } from "../state/store";
 import { ask } from "./Confirm";
 import { Help } from "./Help";
 import { Modal } from "./Modal";
@@ -29,7 +29,7 @@ export function flashBlock(s: State, km: any): string | null {
   const fw = km.firmware;
   if (!fw?.uf2) return "not built yet";
   const edits = (km.id === s.id ? Object.keys(s.assign).length : 0)
-    + (s.newLayers[km.id] || []).length;
+    + layerEdits(s, km.id);
   if (edits) return "unsaved changes; save and build first";
   if (choicesChanged(s, km)) return "build options changed; build again first";
   if (!fw.fresh) return "changed since the last build; build again first";

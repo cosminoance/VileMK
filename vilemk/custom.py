@@ -745,29 +745,58 @@ def _match_brace(text: str, open_idx: int) -> int:
     raise EmitError("unbalanced braces in the base keymap")
 
 
-def _layer_spans(text: str):
-    """-> [(name, bindings_open_idx, bindings_close_idx)] in layer order."""
-    m = _KEYMAP_NODE_RE.search(text)
-    if not m:
-        raise EmitError("no `keymap { }` node in the base keymap")
-    start = text.index("{", m.start())
-    end = _match_brace(text, start)
-    spans, i = [], start + 1
-    node_re = re.compile(r"(?:([A-Za-z_][\w-]*)\s*:\s*)?([A-Za-z_][\w,@.-]*)\s*\{")
-    while i < end:
-        nm = node_re.search(text, i, end)
+_CHILD_RE = re.compile(r"(?:([A-Za-z_][\w-]*)\s*:\s*)?([A-Za-z_][\w,@.-]*)\s*\{")
+_NODE_TAIL_RE = re.compile(r"\s*;[ \t]*\n?")
+
+
+def _children(text: str, open_idx: int, close_idx: int):
+    """-> [(name, start, body_open, body_close, end)] per child of the node whose
+    braces are at `open_idx`/`close_idx`. `text[start:end]` is the whole child,
+    its indentation and its `};` line included, so cutting it leaves no gap."""
+    out, i = [], open_idx + 1
+    while i < close_idx:
+        nm = _CHILD_RE.search(text, i, close_idx)
         if not nm:
             break
         body_open = text.index("{", nm.start())
         body_close = _match_brace(text, body_open)
+        line = text.rfind("\n", 0, nm.start()) + 1
+        start = line if not text[line:nm.start()].strip() else nm.start()
+        end = _NODE_TAIL_RE.match(text, body_close + 1).end()
+        out.append((nm.group(2), start, body_open, body_close, end))
+        i = body_close + 1
+    return out
+
+
+def _cut(text: str, start: int, end: int) -> str:
+    """`text` without `text[start:end]`, and without the blank line that would
+    leave two in a row."""
+    head, tail = text[:start], text[end:]
+    if re.search(r"\n[ \t]*\n[ \t]*$", head):
+        tail = re.sub(r"^[ \t]*\n", "", tail, count=1)
+    return head + tail
+
+
+def _layer_nodes(text: str):
+    """-> [(name, start, end, bindings_open, bindings_close)] in layer order."""
+    m = _KEYMAP_NODE_RE.search(text)
+    if not m:
+        raise EmitError("no `keymap { }` node in the base keymap")
+    start = text.index("{", m.start())
+    out = []
+    for name, n_start, body_open, body_close, n_end in _children(
+            text, start, _match_brace(text, start)):
         body = text[body_open:body_close]
         bm = re.search(r"(?<![\w-])bindings\s*=\s*<", body)
         if bm:
-            b_open = body_open + bm.end()
-            b_close = body.index(">", bm.end()) + body_open
-            spans.append((nm.group(2), b_open, b_close))
-        i = body_close + 1
-    return spans
+            out.append((name, n_start, n_end, body_open + bm.end(),
+                        body.index(">", bm.end()) + body_open))
+    return out
+
+
+def _layer_spans(text: str):
+    """-> [(name, bindings_open_idx, bindings_close_idx)] in layer order."""
+    return [(name, b_open, b_close) for name, _, _, b_open, b_close in _layer_nodes(text)]
 
 
 def _new_layer_node(name: str, display: str, bindings: list, rows) -> str:
@@ -814,6 +843,127 @@ def _insert_new_layers(text: str, new_layers, expanded_layers, rows) -> str:
         names.add(name)
         nodes += _new_layer_node(name, raw or name, expanded_layers[idx], rows)
     return text[:body_end] + nodes + text[body_end:]
+
+
+# A binding whose first parameter is a layer: the built-ins, and a layer-tap
+# record's `&lt_<name>` (the page's `namesLayer()` is the same rule).
+_LAYER_REF_RE = re.compile(r"&(?:mo|lt|to|tog|sl)(?:_\w+)?\s+(\w+)([^&>;]*)")
+_LAYER_PROP_RE = re.compile(r"(?<![\w-])(if-layers|then-layer|layers)(\s*=\s*<)([^>]*)>")
+_NUM_DEFINE_RE = re.compile(r"(?m)^([ \t]*#[ \t]*define[ \t]+(\w+)[ \t]+)(\d+)([ \t]*)$")
+
+
+def drop_layers(text: str, drops) -> tuple[str, list]:
+    """Remove the layers at `drops` (indices) and renumber what names the ones
+    after them. -> (text, notes).
+
+    Keys that switch to a removed layer become `&none`, and a built-in `&lt`
+    keeps its tap as `&kp`. A combo left with no
+    layer, and a conditional layer that watched or raised a removed one, are
+    removed. A layer named through `#define NAV 2` has the define renumbered,
+    not the key. `text` must have its generated block stripped: records are
+    global and are not renumbered here (see `layer_numbered_records()`).
+    """
+    drops = sorted({int(i) for i in drops})
+    if not drops:
+        return text, []
+    nodes = _layer_nodes(text)
+    count = len(nodes)
+    if drops[0] < 0 or drops[-1] >= count:
+        raise EmitError(f"layer {drops[-1] if drops[-1] >= count else drops[0]} "
+                        "does not exist in the base keymap")
+    if len(drops) >= count:
+        raise EmitError("a keymap needs at least one layer")
+    new = {i: i - sum(d < i for d in drops) for i in range(count) if i not in drops}
+    defines = keymap._numeric_defines(text)
+    used, notes, gone_keys = set(), [], 0
+
+    def num(tok):
+        if tok.isdigit():
+            return int(tok)
+        if tok in defines:
+            used.add(tok)
+        return defines.get(tok)
+
+    for i in reversed(drops):
+        _, start, end, _, _ = nodes[i]
+        text = _cut(text, start, end)
+    notes.append("deleted layer(s) " + ", ".join(
+        f"{i} ({nodes[i][0]})" for i in drops))
+
+    for compat in ("zmk,combos", "zmk,conditional-layers"):
+        cm = re.search(r'compatible\s*=\s*"' + re.escape(compat) + '"', text)
+        if not cm:
+            continue
+        open_idx = text.rfind("{", 0, cm.start())
+        for name, start, body_open, body_close, end in reversed(
+                _children(text, open_idx, _match_brace(text, open_idx))):
+            lost = False
+
+            def prop(pm):
+                nonlocal lost
+                toks = pm.group(3).split()
+                vals = [num(t) for t in toks]
+                if None in vals:
+                    return pm.group(0)
+                kept = [str(new[v]) if t.isdigit() else t
+                        for t, v in zip(toks, vals) if v in new]
+                if len(kept) < len(toks) and (pm.group(1) != "layers" or not kept):
+                    lost = True
+                return f"{pm.group(1)}{pm.group(2)}{' '.join(kept)}>"
+
+            body = _LAYER_PROP_RE.sub(prop, text[body_open:body_close])
+            if lost:
+                text = _cut(text, start, end)
+                notes.append(f"removed {name}: it only worked with a deleted layer")
+            else:
+                text = text[:body_open] + body + text[body_close:]
+
+    def ref(m):
+        nonlocal gone_keys
+        tok = m.group(1)
+        v = num(tok)
+        if v is None or (v in new and not tok.isdigit()):
+            return m.group(0)
+        if v in new:
+            return m.group(0)[:m.start(1) - m.start()] + str(new[v]) + m.group(2)
+        gone_keys += 1
+        tail = re.search(r"\s*$", m.group(2)).group(0)
+        tap = m.group(2).split()
+        if m.group(0).startswith("&lt ") and len(tap) == 1:
+            return f"&kp {tap[0]}{tail}"
+        return "&none" + tail
+
+    text = _outside_comments(text, lambda part: _LAYER_REF_RE.sub(ref, part))
+    if gone_keys:
+        notes.append(f"{gone_keys} binding(s) that switched to a deleted layer "
+                     "are now &none (a layer-tap keeps its tap as &kp)")
+
+    def define(m):
+        v = int(m.group(3))
+        if m.group(2) not in used or v not in new:
+            return m.group(0)
+        return f"{m.group(1)}{new[v]}{m.group(4)}"
+
+    return _NUM_DEFINE_RE.sub(define, text), notes
+
+
+def layer_numbered_records(viledances, combos, layers, macros, first: int) -> list:
+    """Names of the records being written that name layer `first` or later by
+    number. They are global, so a layer deletion in one variant cannot renumber
+    them."""
+    def refs(texts):
+        return [int(m.group(1)) for t in texts
+                for m in _LAYER_REF_RE.finditer(str(t or "")) if m.group(1).isdigit()]
+
+    named = (
+        [(r, refs(r.get(slot) for slot in VILE_SLOTS)) for r in viledances]
+        + [(r, refs(st.get("binding") for st in r.get("steps") or [])) for r in macros]
+        + [(r, refs([r.get("binding")]) + [int(n) for n in r.get("layers") or []])
+           for r in combos]
+        + [(r, [int(n) for n in r.get("if_layers") or []] + [int(r.get("then_layer") or 0)]
+            if (r.get("mode") or "lt") == "conditional" else [int(r.get("layer") or 0)])
+           for r in layers])
+    return [r["name"] for r, nums in named if any(n >= first for n in nums)]
 
 
 def row_sizes(keys) -> list:
@@ -1020,7 +1170,8 @@ def reachable_records(text, viledances, combos, layers, macros, scope=""):
 
 
 def build_variant(base_text, expanded_layers, assignments, viledances, combos,
-                  layers=(), macros=(), rows=None, new_layers=(), scope=""):
+                  layers=(), macros=(), rows=None, new_layers=(), scope="",
+                  drop=()):
     """Base keymap + key assignments + only the custom code those keys use.
 
     `assignments` is {layer_index: {key_position: binding}}. `expanded_layers` is
@@ -1032,7 +1183,8 @@ def build_variant(base_text, expanded_layers, assignments, viledances, combos,
     address them by the same index it uses for every other layer. `scope` is the
     scope key of the variant being written (`scope_key("variant", name)`); the
     combos and conditional layers switched on for it are the ones written, and
-    nothing is written when it is blank.
+    nothing is written when it is blank. `drop` is the layer indices to delete,
+    counted like `assignments`, after the new layers are in (`drop_layers()`).
 
     Which VileDances, macros and layer-taps come with it is not a filter over the
     keys alone: it is the set *reachable* from them, since one record may
@@ -1066,10 +1218,18 @@ def build_variant(base_text, expanded_layers, assignments, viledances, combos,
     # under a binding that still points at it, and the build fails on an
     # undefined node label.
     text = strip_block(text)
+    text, dropped = drop_layers(text, drop)
     wanted, live_combos, live_layers, live_macros = reachable_records(
         text, viledances, combos, layers, macros, scope)
 
     gen, errors = block(wanted, live_combos, live_layers, live_macros)
+    errors = dropped + errors
+    if drop:
+        stale = layer_numbered_records(wanted, live_combos, live_layers, live_macros,
+                                       min(int(i) for i in drop))
+        if stale:
+            errors.append("check the layer numbers in " + ", ".join(stale)
+                          + ": saved records are shared and were not renumbered")
     if gen:
         text = text.rstrip() + "\n\n" + gen
 

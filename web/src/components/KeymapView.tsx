@@ -6,7 +6,7 @@ import { tabForBinding } from "../lib/cards";
 import { LIVE, draftOf, useStore } from "../state/store";
 import { Board } from "./Board";
 import { KeyEditor } from "./KeyEditor";
-import { AddLayerButton } from "./LayerImport";
+import { AddLayerButton, DeleteLayerButton } from "./LayerImport";
 import { Menu } from "./Menu";
 import { Panel } from "./Panels";
 import { Tables } from "./Tables";
@@ -26,6 +26,9 @@ export function KeymapView() {
   // back so a click lands on the layer being shown.
   const li = Math.min(s.layer, Math.max(allLayers.length - 1, 0));
   const layer = allLayers[li];
+  const drops = s.dropLayers[km.id] || [];
+  const gone = drops.includes(li);
+  const drawn = !!layer && !layer.reserved && !gone;
   useEffect(() => { if (li !== s.layer) d({ t: "layer", n: li }); }, [li, s.layer, d]);
 
   // The board's `.pick` class mirrors the combo draft's positions.
@@ -93,9 +96,12 @@ export function KeymapView() {
 
       <div className="tabs">
         {allLayers.map((l, i) => (
-          <button key={i} className={i === li ? "sel" : ""}
-                  title={l.pending ? "not saved yet - Save as variant to write it"
-                                   : undefined}
+          <button key={i}
+                  className={[i === li && "sel", drops.includes(i) && "gone"]
+                               .filter(Boolean).join(" ")}
+                  title={drops.includes(i) ? "deleted when you save"
+                         : l.pending ? "not saved yet - Save as variant to write it"
+                         : undefined}
                   onClick={() => d({ t: "layer", n: i })}>
             {i}&nbsp;&middot;&nbsp;{l.display}{l.pending ? " *" : ""}
           </button>
@@ -104,23 +110,33 @@ export function KeymapView() {
           <AddLayerButton km={km} />}
       </div>
 
-      {!layer || layer.reserved
+      {lay.approximate && drawn &&
+        <div className="legend">
+          No <code>zmk,physical-layout</code> for this keyboard; keys are
+          drawn on a plain grid, but the numbers are still the real key
+          positions.
+        </div>}
+      {layer &&
+        <div className="boardopts">
+          {drawn &&
+            <Toggle checked={s.nums} onChange={(on) => d({ t: "nums", on })}>
+              key positions
+            </Toggle>}
+          {live &&
+            <span className="end">
+              <DeleteLayerButton km={km} at={li}
+                                 left={allLayers.length - drops.length} />
+            </span>}
+        </div>}
+
+      {gone
+        ? <p className="legend">This layer is deleted when you save.</p>
+        : !drawn
         ? <p className="legend">
             This layer is <code>status = "reserved"</code>: empty here, available
             to fill in from ZMK Studio.
           </p>
         : <>
-            {lay.approximate &&
-              <div className="legend">
-                No <code>zmk,physical-layout</code> for this keyboard; keys are
-                drawn on a plain grid, but the numbers are still the real key
-                positions.
-              </div>}
-            <div className="boardopts">
-              <Toggle checked={s.nums} onChange={(on) => d({ t: "nums", on })}>
-                key positions
-              </Toggle>
-            </div>
             <Board km={km} lay={lay} bindings={layer.bindings}
                    baseBindings={baseBindings} assign={s.assign[li] || {}}
                    nums={s.nums} hot={s.hot} sel={sel} editing={s.editing}
