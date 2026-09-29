@@ -2,6 +2,8 @@
   <img src=".github/images/logo-banner.png" alt="VileMK" width="480">
 </p>
 
+**Basic operations:** a video walkthrough on
+[YouTube](https://www.youtube.com/playlist?list=PLAOzGtpkRAZg).
 
 VileMK builds ZMK firmware for your keyboard on your own machine, from a keymap
 you edit in a local web app. The keymap can use the things ZMK Studio can't

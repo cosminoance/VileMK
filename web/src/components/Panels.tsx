@@ -63,6 +63,19 @@ function Text({ b, f, cls = "kb wide", ph, value }:
                 onChange={(e) => b.set(f, e.target.value)} />;
 }
 
+// Keeps the typed text so a trailing space or comma survives until the next
+// number; resyncs only when the list changes from outside (board clicks).
+function NumList({ b, f, ph, value }:
+    { b: Bound; f: string; ph?: string; value: number[] | undefined }) {
+  const joined = (value || []).join(" ");
+  const [text, setText] = useState(joined);
+  const parsed = text.split(/[\s,]+/).filter(Boolean).map(Number).join(" ");
+  const shown = parsed === joined ? text : joined;
+  return <input className="kb wide" value={shown} placeholder={ph}
+                autoComplete="off" ref={(el) => b.claim(f, el)}
+                onChange={(e) => { setText(e.target.value); b.set(f, e.target.value); }} />;
+}
+
 // Focusing one of these points the menu below at it.
 function BindIn({ b, f, cls = "kb", ph, value }:
     { b: Bound; f: string; cls?: string; ph?: string; value: any }) {
@@ -226,8 +239,8 @@ export function ComboPanel() {
     <Shell mode="combo" draft={d}>
       <Name b={b} ph="e.g. jk_quote" />
       <Slot label="Keys">
-        <Text b={b} f="key_positions" ph="click the board above"
-              value={(d.key_positions || []).join(" ")} />
+        <NumList b={b} f="key_positions" ph="click the board above"
+                 value={d.key_positions} />
       </Slot>
       <Slot label="Output key">
         <BindIn b={b} f="binding" ph="&kp SQT" value={d.binding} />
@@ -236,8 +249,7 @@ export function ComboPanel() {
         <Text b={b} f="timeout_ms" cls="kb sm" value={d.timeout_ms ?? 50} />
       </Slot>
       <Slot label="Layers">
-        <Text b={b} f="layers" ph="blank = all layers"
-              value={(d.layers || []).join(" ")} />
+        <NumList b={b} f="layers" ph="blank = all layers" value={d.layers} />
       </Slot>
       <div className="hint">
         While this panel is open the <b>board above is the chord picker</b> -
@@ -374,7 +386,7 @@ export function CondPanel({ km }: { km: any }) {
     <Shell mode="conditional" draft={d}>
       <Name b={b} ph="e.g. tri_layer" />
       <Slot label="If layers">
-        <Text b={b} f="if_layers" ph="1 2" value={(d.if_layers || []).join(" ")} />
+        <NumList b={b} f="if_layers" ph="1 2" value={d.if_layers} />
       </Slot>
       <Slot label="Then layer">
         <LayerSelect b={b} km={km} f="then_layer" value={d.then_layer} />
