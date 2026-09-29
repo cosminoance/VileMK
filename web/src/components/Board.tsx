@@ -94,12 +94,15 @@ export interface BoardProps {
   editing: number | null;
   /** Null when the page is read-only: no key is clickable. */
   onKey: ((pos: number) => void) | null;
+  /** The layer import's renumbering: the number drawn on each key, null for a
+   *  key left out. */
+  renum?: (number | null)[];
   /** Taken by the export dialog, which serialises the board it renders. */
   svgRef?: RefObject<SVGSVGElement | null>;
 }
 
 export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
-                        sel, editing, onKey, svgRef }: BoardProps) {
+                        sel, editing, onKey, renum, svgRef }: BoardProps) {
   const keys: number[][] = lay.keys;
   const { x0, y0, w, h } = bounds(keys);
   const [peek, setPeek] = useState<Peek | null>(null);
@@ -136,6 +139,8 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
         if (pend !== undefined) cls.push("asg");
         if (onKey) cls.push("clickable");
         if (editing === i) cls.push("hot");
+        if (renum && renum[i] === null) cls.push("off");
+        const num = renum ? renum[i] : i;
 
         const res = b !== undefined ? resolveBinding(km, b, 3) : null;
         if (res && res.hint) cls.push("compound");
@@ -166,7 +171,7 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
              onMouseLeave={diff ? leave : undefined}>
             {!diff && <title>{tip}</title>}
             <rect x={x} y={y} width={W} height={H} rx={5} />
-            {nums && <text className="pos" x={x + 3} y={y + 9}>{i}</text>}
+            {nums && num !== null && <text className="pos" x={x + 3} y={y + 9}>{num}</text>}
             {res?.hint &&
               <text className="hint" x={x + W - 3} y={y + 9} textAnchor="end">
                 {res.hint}
