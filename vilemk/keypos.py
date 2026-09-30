@@ -92,11 +92,12 @@ def iter_dts_files(roots):
 
 
 class Layout:
-    def __init__(self, label, display_name, source, keys):
+    def __init__(self, label, display_name, source, keys, transform=None):
         self.label = label
         self.display_name = display_name
         self.source = source
         self.keys = keys          # list of (w, h, x, y, rot, rx, ry)
+        self.transform = transform  # label from `transform = <&label>`, if any
 
     @property
     def count(self):
@@ -181,8 +182,9 @@ def scan_file(path):
                     for m in KEY_ATTR_RE.finditer(body)]
             if keys:
                 dn = re.search(r'display-name\s*=\s*"([^"]*)"', body)
+                tr = re.search(r"(?<![\w-])transform\s*=\s*<\s*&(\w+)\s*>", body)
                 layouts.append(Layout(label or name, dn.group(1) if dn else "",
-                                      path, keys))
+                                      path, keys, tr.group(1) if tr else None))
         elif 'compatible = "zmk,matrix-transform"' in body:
             mm = re.search(r"map\s*=\s*<(.*?)>\s*;", body, re.S)
             if mm:
@@ -314,6 +316,38 @@ def cluster_rows(ys, gap=40, span=90):
         else:
             rows.append([y])
     return {y: i for i, row in enumerate(rows) for y in row}
+
+
+def wiring_order(layout: Layout, transforms):
+    """`layout`'s keys regrouped to follow its matrix transform, or None.
+
+    Binding n goes to the switch at transform entry n; the physical layout only
+    draws it. Charybdis_2 lists the left half of two rows before the right half
+    of either, so its picture puts bindings on the wrong keys. A transform's map
+    is written one visual row per line: when a line's positions span more than
+    one visual row of the layout, the keys are regrouped row by row to match the
+    lines. None when the layout agrees with a transform, or no transform pairs
+    its lines with the layout's rows one to one.
+    """
+    keys = layout.keys
+    row_of = cluster_rows([k[3] for k in keys])
+    rows = {}
+    for i, k in enumerate(keys):
+        rows.setdefault(row_of[k[3]], []).append(i)
+    groups = [rows[r] for r in sorted(rows)]
+    fixes = set()
+    for tr in transforms:
+        sizes = [len(r) for r in tr.rows]
+        if sum(sizes) != len(keys) or [len(g) for g in groups] != sizes:
+            continue
+        at, mixed = 0, False
+        for n in sizes:
+            mixed |= len({row_of[keys[i][3]] for i in range(at, at + n)}) > 1
+            at += n
+        if not mixed:
+            return None
+        fixes.add(tuple(keys[i] for g in groups for i in g))
+    return list(fixes.pop()) if len(fixes) == 1 else None
 
 
 def render_layout(layout: Layout, labels=None, cell=None):
