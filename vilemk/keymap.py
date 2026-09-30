@@ -589,12 +589,6 @@ def collect_data(args):
                 opts.append({**own, "display": f"{title} (wiring order)",
                              "keys": [list(k) for k in fixed], "reordered": True})
                 own["display"] = f"{title} (as its file lists it)"
-                data["warnings"].append(
-                    f"The layout file {os.path.relpath(l.source)} lists the keys in "
-                    f"a different order than the keyboard's matrix transform, and "
-                    f"the firmware follows the transform. The board is drawn in "
-                    f"wiring order, which shows where each binding really lands. "
-                    f"The layout menu also has the file's own order.")
             opts.append(own)
         opts += [transform_payload(t) for t in ts]
         # put a layout that matches the keymap's own binding count first

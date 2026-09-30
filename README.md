@@ -427,4 +427,5 @@ Or run `make install` once and use the `vilemk-*` commands (`vilemk-design`,
 
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md) covers what a keyboard module needs,
 the repositories VileMK prepares before building, each build error and what it
-means, and missing drivers.
+means, missing drivers, and keyboards whose layout file disagrees with their
+wiring.

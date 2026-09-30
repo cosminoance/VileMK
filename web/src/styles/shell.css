@@ -69,6 +69,9 @@ select,.toggle{padding:5px 8px;border:1px solid var(--line);border-radius:6px;
 select{min-width:0;max-width:100%}
 /* Fills what the bar leaves, so the row ends where the cards below it end. */
 .bar select.grow{flex:1 1 240px}
+/* The layout menu when LayoutOrderWarn is explaining it just below. */
+.bar select.flag{border-color:var(--warn)}
+.bar + .warn.forsel{margin-top:-4px}
 label.toggle{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
 .tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px}
 .tabs button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;
