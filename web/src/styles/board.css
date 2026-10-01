@@ -53,6 +53,10 @@ section.card .foldhead h3{margin:0}
 .foldbody .bar{margin-bottom:0}
 .foldbody .hint{margin-top:6px}
 .foldbody .warn{margin:8px 0 0}
+/* Same metrics as the h3 and one line, so a summary appearing or changing
+   never changes the heading's height. */
+.foldhead .foldsum{font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
 .foldhead .foldwarn{color:var(--warn)}
 section.card.fold.accent{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
 .fold.accent .foldhead,section.card.fold.accent .foldhead h3{color:var(--accent)}

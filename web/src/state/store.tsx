@@ -149,6 +149,7 @@ export type Action =
   | { t: "editKey"; pos: number; ptab: string; cur: string }
   | { t: "closeKey" }
   | { t: "assign"; pos: number; v: string; close?: boolean; msg?: Msg | null }
+  | { t: "swap"; from: number; to: number; file: (string | undefined)[] }
   | { t: "clearAssign"; kmId: string }
   | { t: "openPanel"; mode: Mode; draft?: any }
   | { t: "closePanel" }
@@ -223,6 +224,25 @@ export function reducer(s: State, a: Action): State {
       return { ...s, assign,
                ...(a.close ? { editing: null, activeField: null, keyVal: "" } : {}),
                ...(a.msg !== undefined ? { msg: a.msg } : {}) };
+    }
+
+    // `file` is the layer's bindings as saved. A key that ends up holding its
+    // saved binding again drops out of `assign`, so swapping back is no edit.
+    case "swap": {
+      const layer = { ...(s.assign[s.layer] || {}) };
+      const now = (p: number) => layer[p] ?? a.file[p] ?? "&none";
+      const put = (p: number, v: string) => {
+        if (v === (a.file[p] ?? "&none")) delete layer[p]; else layer[p] = v;
+      };
+      const vFrom = now(a.from), vTo = now(a.to);
+      put(a.from, vTo);
+      put(a.to, vFrom);
+      const assign = { ...s.assign };
+      if (Object.keys(layer).length) assign[s.layer] = layer;
+      else delete assign[s.layer];
+      const ed = s.editing === a.from ? vTo : s.editing === a.to ? vFrom : null;
+      return { ...s, assign,
+               ...(ed !== null ? { keyVal: ed } : {}) };
     }
 
     case "clearAssign":
