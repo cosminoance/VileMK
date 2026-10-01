@@ -119,6 +119,25 @@ hand.
 
 <img src=".github/images/trouble-not-installed.png" width="560" alt="The build sheet refusing a variation whose build.yaml guessed board: charybdis, with the Board not installed dialog">
 
+### "... lists its keys in a different order than its wiring"
+
+A warning under the layout menu, with the menu outlined. The keyboard's
+physical layout file (the picture VileMK and ZMK Studio draw) lists its keys
+in a different order than its matrix transform (the wiring). The firmware
+follows the wiring: binding 30 goes to the switch at position 30 of the
+transform, wherever the picture draws it. Charybdis_2 does this. Its layout
+file lists the left half of the bottom two rows before the right half, so
+drawn from the file, Z X C V B appear on the right half.
+
+VileMK draws the board in **wiring order** by default, so each binding shows
+on the key that types it. The layout menu also has the file's own order. A
+variation made while the board was drawn from the file has its keys where
+that picture showed them, so on the keyboard they type from other keys.
+Rearrange them against the wiring-order board and save again. Nothing in the
+module is changed. ZMK Studio still draws the file's order.
+
+<img src=".github/images/trouble-layout-order.png" width="800" alt="A Charybdis keymap with the layout menu set to Charybdis 5x6 (wiring order) and an orange warning explaining that the layout file lists its keys in a different order than the matrix transform">
+
 ### "Pick the shield folder"
 
 The module keeps this keyboard in more than one folder and the variation has

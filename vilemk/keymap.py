@@ -579,7 +579,18 @@ def collect_data(args):
         data = parse_keymap(path)
         ls, ts, _name = keypos.resolve(path, roots, layouts, transforms, chosen)
         counts = {len(l["bindings"]) for l in data["layers"] if not l["reserved"]}
-        opts = [layout_payload(l) for l in ls] + [transform_payload(t) for t in ts]
+        opts = []
+        for l in ls:
+            own = layout_payload(l)
+            fixed = keypos.wiring_order(
+                l, [t for t in ts if not l.transform or t.label == l.transform])
+            if fixed:
+                title = own["display"] or l.label
+                opts.append({**own, "display": f"{title} (wiring order)",
+                             "keys": [list(k) for k in fixed], "reordered": True})
+                own["display"] = f"{title} (as its file lists it)"
+            opts.append(own)
+        opts += [transform_payload(t) for t in ts]
         # put a layout that matches the keymap's own binding count first
         if counts:
             opts.sort(key=lambda o: 0 if o["count"] in counts else 1)

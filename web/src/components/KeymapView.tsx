@@ -6,6 +6,7 @@ import { tabForBinding } from "../lib/cards";
 import { LIVE, draftOf, useStore } from "../state/store";
 import { Board } from "./Board";
 import { KeyEditor } from "./KeyEditor";
+import { LayoutOrderWarn, LayoutSelect } from "./LayoutSelect";
 import { AddLayerButton, DeleteLayerButton } from "./LayerImport";
 import { Menu } from "./Menu";
 import { Panel } from "./Panels";
@@ -65,18 +66,7 @@ export function KeymapView() {
       </div>
 
       <div className="bar">
-        {km.layouts.length > 1
-          ? <select value={s.layout}
-                    onChange={(e) => d({ t: "layout", n: +e.target.value })}>
-              {km.layouts.map((l: any, i: number) => (
-                <option key={i} value={i}>
-                  {l.display || l.label} &middot; {l.count} keys
-                </option>
-              ))}
-            </select>
-          : <span className="path">
-              {lay.display || lay.label} &middot; {lay.count} keys
-            </span>}
+        <LayoutSelect km={km} />
         <select className="grow" value={s.base} onChange={(e) => d({ t: "base", id: e.target.value })}>
           <option value="">compare with… (off)</option>
           {s.data.keymaps.filter((k: any) => k.id !== km.id).map((k: any) => (
@@ -84,6 +74,7 @@ export function KeymapView() {
           ))}
         </select>
       </div>
+      <LayoutOrderWarn km={km} />
 
       {live && <VariantBar key={km.id} km={km} />}
 

@@ -45,6 +45,7 @@ import os
 import re
 
 from . import PROJECT_DIR, keymap, workspace
+from .keypos import strip_comments
 from .check import DISPLAY_SHIELD_RE, _conf_turns_off, _defconfig_turns_on
 CUSTOM_DIR = os.path.join(PROJECT_DIR, "custom")
 DIRS = {"viledance": os.path.join(CUSTOM_DIR, "viledance"),
@@ -778,15 +779,17 @@ def _cut(text: str, start: int, end: int) -> str:
 
 
 def _layer_nodes(text: str):
-    """-> [(name, start, end, bindings_open, bindings_close)] in layer order."""
-    m = _KEYMAP_NODE_RE.search(text)
+    """-> [(name, start, end, bindings_open, bindings_close)] in layer order.
+    Commented-out layers are not layers."""
+    src = strip_comments(text)
+    m = _KEYMAP_NODE_RE.search(src)
     if not m:
         raise EmitError("no `keymap { }` node in the base keymap")
-    start = text.index("{", m.start())
+    start = src.index("{", m.start())
     out = []
     for name, n_start, body_open, body_close, n_end in _children(
-            text, start, _match_brace(text, start)):
-        body = text[body_open:body_close]
+            src, start, _match_brace(src, start)):
+        body = src[body_open:body_close]
         bm = re.search(r"(?<![\w-])bindings\s*=\s*<", body)
         if bm:
             out.append((name, n_start, n_end, body_open + bm.end(),
@@ -824,10 +827,11 @@ def _insert_new_layers(text: str, new_layers, expanded_layers, rows) -> str:
     if existing + len(new_layers) > MAX_LAYERS:
         raise EmitError(f"ZMK supports at most {MAX_LAYERS} layers - this keymap "
                         f"already has {existing}, {len(new_layers)} more was requested")
-    m = _KEYMAP_NODE_RE.search(text)
+    src = strip_comments(text)
+    m = _KEYMAP_NODE_RE.search(src)
     if not m:
         raise EmitError("no `keymap { }` node in the base keymap")
-    body_end = _match_brace(text, text.index("{", m.start()))
+    body_end = _match_brace(src, src.index("{", m.start()))
     names = {nm for nm, *_ in spans}
     nodes = ""
     for i, rec in enumerate(new_layers):
@@ -891,12 +895,13 @@ def drop_layers(text: str, drops) -> tuple[str, list]:
         f"{i} ({nodes[i][0]})" for i in drops))
 
     for compat in ("zmk,combos", "zmk,conditional-layers"):
-        cm = re.search(r'compatible\s*=\s*"' + re.escape(compat) + '"', text)
+        src = strip_comments(text)
+        cm = re.search(r'compatible\s*=\s*"' + re.escape(compat) + '"', src)
         if not cm:
             continue
-        open_idx = text.rfind("{", 0, cm.start())
+        open_idx = src.rfind("{", 0, cm.start())
         for name, start, body_open, body_close, end in reversed(
-                _children(text, open_idx, _match_brace(text, open_idx))):
+                _children(src, open_idx, _match_brace(src, open_idx))):
             lost = False
 
             def prop(pm):
