@@ -35,6 +35,19 @@ pre.dts{background:var(--bg);border:1px solid var(--line);border-radius:6px;
 .k.pick{cursor:pointer}
 .k.asg rect{stroke:var(--accent);fill:var(--accent-soft)}
 .k.clickable{cursor:pointer}
+.k.movable{touch-action:none}
+.board.dragging,.board.dragging .k{cursor:grabbing}
+.k.lift{opacity:.4}
+.k.drop rect{stroke:var(--accent);stroke-width:2;stroke-dasharray:4 2}
+.boardwrap{position:relative}
+.dragnote{position:absolute;left:50%;bottom:100%;z-index:2;transform:translate(-50%,-4px);
+  padding:3px 12px;border-radius:999px;background:var(--accent);color:var(--on-accent);
+  font-size:12px;white-space:nowrap;pointer-events:none}
+.keyghost{position:fixed;left:0;top:0;z-index:50;pointer-events:none;
+  transform:translate(-50%,-50%) scale(1.15) rotate(-3deg);
+  filter:drop-shadow(0 6px 10px rgb(0 0 0 / .45))}
+.keyghost svg{display:block}
+.keyghost .k rect{stroke:var(--accent);stroke-width:1.5}
 .k.off{opacity:.35}
 .k.off rect{stroke-dasharray:3 3}
 .picktabs{margin:0 0 8px;align-items:center}

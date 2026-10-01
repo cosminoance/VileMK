@@ -59,6 +59,11 @@ export function KeymapView() {
         ptab: tabForBinding(String(cur ?? ""), s.store) });
   };
 
+  // Dragging a key onto another swaps what the two hold, as pending edits. Not
+  // while a combo is drafted: there the board picks positions.
+  const onSwap = !live || s.emode === "combo" || !layer ? null
+    : (from: number, to: number) => d({ t: "swap", from, to, file: layer.bindings });
+
   return (
     <main>
       <div className="bar">
@@ -131,7 +136,7 @@ export function KeymapView() {
             <Board km={km} lay={lay} bindings={layer.bindings}
                    baseBindings={baseBindings} assign={s.assign[li] || {}}
                    nums={s.nums} hot={s.hot} sel={sel} editing={s.editing}
-                   onKey={onKey} />
+                   onKey={onKey} onSwap={onSwap} />
           </>}
 
       {/* The editor area holds a key's editor, a creation panel, or nothing.

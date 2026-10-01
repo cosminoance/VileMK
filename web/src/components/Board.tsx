@@ -3,7 +3,9 @@
 // board coordinates that point is `((rx-x0)*S, (ry-y0)*S)`, which is what
 // `rotate(deg cx cy)` takes.
 
-import { useEffect, useRef, useState, type MouseEvent, type RefObject } from "react";
+import {
+  useEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { resolveBinding } from "../lib/labels";
@@ -14,6 +16,7 @@ const PAD = 6;
 const LBL = 11, SHIFT = 9, SMALL = 9;
 const LINE = 1.15;
 const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
+const DRAG = 4;   // pixels the pointer moves before a press is a drag
 
 // SVG text does not wrap, so labels are measured and broken here. A canvas
 // context reports the advance widths the renderer will use, which beats
@@ -94,6 +97,8 @@ export interface BoardProps {
   editing: number | null;
   /** Null when the page is read-only: no key is clickable. */
   onKey: ((pos: number) => void) | null;
+  /** Dropping one key on another; null when keys cannot be dragged. */
+  onSwap?: ((from: number, to: number) => void) | null;
   /** The layer import's renumbering: the number drawn on each key, null for a
    *  key left out. */
   renum?: (number | null)[];
@@ -102,7 +107,7 @@ export interface BoardProps {
 }
 
 export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
-                        sel, editing, onKey, renum, svgRef }: BoardProps) {
+                        sel, editing, onKey, onSwap, renum, svgRef }: BoardProps) {
   const keys: number[][] = lay.keys;
   const { x0, y0, w, h } = bounds(keys);
   const [peek, setPeek] = useState<Peek | null>(null);
@@ -120,8 +125,67 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
   };
   const leave = () => { window.clearTimeout(timer.current); setPeek(null); };
 
+  // Pointer events, since HTML drag and drop does not start on SVG elements.
+  // A press that never moves DRAG pixels stays a click.
+  const [drag, setDrag] = useState<{ from: number; over: number | null } | null>(null);
+  const dragged = useRef(false);
+  // The pointer, kept out of state so the ghost follows it without a re-render.
+  const pt = useRef({ x: 0, y: 0 });
+  const ghost = useRef<HTMLDivElement>(null);
+  const stop = useRef<() => void>(() => {});
+  useEffect(() => () => stop.current(), []);
+
+  const press = (e: PointerEvent<SVGGElement>, from: number) => {
+    if (!onSwap || e.button !== 0) return;
+    e.preventDefault();
+    dragged.current = false;
+    const svg = e.currentTarget.ownerSVGElement;
+    const x0 = e.clientX, y0 = e.clientY;
+    const at = (ev: globalThis.PointerEvent) => {
+      const g = document.elementFromPoint(ev.clientX, ev.clientY)?.closest("[data-pos]");
+      return g && g.closest("svg") === svg ? Number(g.getAttribute("data-pos")) : null;
+    };
+    const move = (ev: globalThis.PointerEvent) => {
+      if (!dragged.current && Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG) return;
+      if (!dragged.current) leave();
+      dragged.current = true;
+      pt.current = { x: ev.clientX, y: ev.clientY };
+      if (ghost.current)
+        ghost.current.style.translate = `${ev.clientX}px ${ev.clientY}px`;
+      const hit = at(ev), over = hit === from ? null : hit;
+      setDrag((p) => p && p.over === over ? p : { from, over });
+    };
+    const up = (ev: globalThis.PointerEvent) => {
+      stop.current();
+      if (!dragged.current) return;
+      const to = at(ev);
+      if (to !== null && to !== from) onSwap(from, to);
+    };
+    stop.current = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      setDrag(null);
+    };
+    const cancel = () => stop.current();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  };
+
+  // The dragged key's tile, drawn again under the pointer.
+  let lifted = null as { body: ReactNode; cls: string; x: number; y: number;
+                         w: number; h: number } | null;
+
   return (<>
-    <svg ref={svgRef} className="board" width={w * S + PAD} height={h * S + PAD}
+    <div className="boardwrap">
+    {drag &&
+      <div className="dragnote" role="status">
+        {drag.over === null
+          ? `Drag key ${drag.from} onto another key to swap them`
+          : `Drop to swap keys ${drag.from} and ${drag.over}`}
+      </div>}
+    <svg ref={svgRef} className={drag ? "board dragging" : "board"} width={w * S + PAD} height={h * S + PAD}
          viewBox={`0 0 ${w * S + PAD} ${h * S + PAD}`}>
       <g transform={`translate(${PAD / 2} ${PAD / 2})`}>
       {keys.map((k, i) => {
@@ -138,6 +202,9 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
         if (sel.includes(i)) cls.push("pick");
         if (pend !== undefined) cls.push("asg");
         if (onKey) cls.push("clickable");
+        if (onSwap) cls.push("movable");
+        if (drag?.from === i) cls.push("lift");
+        if (drag?.over === i) cls.push("drop");
         if (editing === i) cls.push("hot");
         if (renum && renum[i] === null) cls.push("off");
         const num = renum ? renum[i] : i;
@@ -161,14 +228,7 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
         const step = LBL * LINE;
         const top = cy - ((lines.length - 1) * step) / 2 + (shift ? SHIFT * 0.6 : 0);
 
-        return (
-          <g key={i} className={cls.join(" ")}
-             transform={rot ? `rotate(${rot / 100} ${(rx - x0) * S} ${(ry - y0) * S})` : undefined}
-             onClick={onKey ? () => { leave(); onKey(i); } : undefined}
-             onMouseEnter={diff ? (e) => enter(e, {
-               pos: i, now: b, nowFull: res ? res.full : "",
-               was: old!, wasFull: oldRes ? oldRes.full : "" }) : undefined}
-             onMouseLeave={diff ? leave : undefined}>
+        const body = <>
             {!diff && <title>{tip}</title>}
             <rect x={x} y={y} width={W} height={H} rx={5} />
             {nums && num !== null && <text className="pos" x={x + 3} y={y + 9}>{num}</text>}
@@ -189,11 +249,38 @@ export function Board({ km, lay, bindings, baseBindings, assign, nums, hot,
                     textAnchor="middle" dominantBaseline="central">
                 {clip(`was ${oldRes ? oldRes.short : ""}`, W - 2, SMALL)}
               </text>}
+          </>;
+        if (drag?.from === i)
+          lifted = { body, x: x - 2, y: y - 2, w: W + 4, h: H + 4,
+                     cls: cls.filter((c) => c !== "lift").join(" ") };
+
+        return (
+          <g key={i} className={cls.join(" ")} data-pos={i}
+             transform={rot ? `rotate(${rot / 100} ${(rx - x0) * S} ${(ry - y0) * S})` : undefined}
+             onPointerDown={onSwap ? (e) => press(e, i) : undefined}
+             onClick={onKey ? () => {
+               if (dragged.current) { dragged.current = false; return; }
+               leave(); onKey(i);
+             } : undefined}
+             onMouseEnter={diff ? (e) => { if (!drag) enter(e, {
+               pos: i, now: b, nowFull: res ? res.full : "",
+               was: old!, wasFull: oldRes ? oldRes.full : "" }); } : undefined}
+             onMouseLeave={diff ? leave : undefined}>
+            {body}
           </g>
         );
       })}
       </g>
     </svg>
+    </div>
+    {lifted && createPortal(
+      <div ref={ghost} className="keyghost"
+           style={{ translate: `${pt.current.x}px ${pt.current.y}px` }}>
+        <svg width={lifted.w} height={lifted.h}
+             viewBox={`${lifted.x} ${lifted.y} ${lifted.w} ${lifted.h}`}>
+          <g className={lifted.cls}>{lifted.body}</g>
+        </svg>
+      </div>, document.body)}
     {peek && createPortal(<DiffTip {...peek} />, document.body)}
   </>);
 }
