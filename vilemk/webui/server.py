@@ -29,7 +29,8 @@ Endpoints:
                                   `reset: true` adds the settings_reset entries,
                                   `parts` picks the add-on shields, `folder`,
                                   `entries` and `confs` are a prepared module's
-                                  choices)
+                                  choices, `slots` the vile slots settings or
+                                  false)
     DELETE /api/variant/<name>    remove variants/<name>/
     POST   /api/import/inspect    read a shared keymap, report record collisions
                                   and, for a keyboard not added here, the module
@@ -53,6 +54,8 @@ Endpoints:
                                   lists files that could not be deleted
     POST   /api/module-name       {module, alias}: the name the page shows for a
                                   module (custom/module-names.json); blank resets
+    POST   /api/studio-keyboard   {key, id}: the keymap a Studio keyboard is matched
+                                  to (custom/studio-keyboards.json); blank is none
     POST   /api/keyboard          add one ({id, source, controller}); `dry: true`
                                   returns the plan and writes nothing
     DELETE /api/keyboard/<id>     drop its build.yaml entries and config/ files
@@ -63,8 +66,8 @@ Endpoints:
                                   `variants` while variants build it
     POST   /api/build             start building one variant ({name}); with
                                   `reset` (and `parts`, `folder`, `entries`,
-                                  `confs`) it rewrites the variant's build.yaml
-                                  from those choices first; `rewrites: false`
+                                  `confs`, `slots`) it rewrites the variant's
+                                  build.yaml from those choices first; `rewrites: false`
                                   skips the modules' CI keymap edits
     POST   /api/build/open        open the variant's firmware folder ({name})
                                   in the system file manager
@@ -72,7 +75,8 @@ Endpoints:
                                   (`variant=` names whose targets and files to list;
                                   `reset=0|1&parts=<json>` lists the targets those
                                   choices would build, as do `folder=`,
-                                  `entries=<json>` and `confs=<json>`; `rewrites`
+                                  `entries=<json>`, `confs=<json>` and
+                                  `slots=<json>`; `rewrites`
                                   lists the CI keymap edits the build would make,
                                   `drivers` what its prepared modules' own builds
                                   fetch that west.yml lacks)
@@ -81,6 +85,25 @@ Endpoints:
                                   the UF2 bootloader drives mounted now (the
                                   flash sheet polls it)
     POST   /api/flash             copy one file onto one drive ({name, file, drive})
+    GET    /api/studio/ports      USB serial ports that answer as ZMK Studio, and
+                                  the connected one (`connected`)
+    POST   /api/studio/connect    open one ({port}, or the only one that answers)
+    DELETE /api/studio/connect    close it
+    GET    /api/studio/lock       {unlocked, unsaved}; the page polls it
+    GET    /api/studio/keymap     the keyboard's layers and bindings
+    GET    /api/studio/behaviors  the firmware's behaviors (read once per connect)
+    GET    /api/studio/layouts    physical layouts and the active one
+    POST   /api/studio/binding    {layer_id, position, behavior, param1, param2},
+                                  pending on the keyboard until save
+    POST   /api/studio/layer      turn on the next reserved layer: {index, layer}
+    POST   /api/studio/layer/remove   {index}: take a layer out until discard
+    POST   /api/studio/layer/restore  {layer_id, at}: put a removed one back
+    POST   /api/studio/layer/name     {layer_id, name}
+    POST   /api/studio/layer/move     {start, dest} (indices): the keymap after
+    POST   /api/studio/save       write pending changes to the keyboard's flash
+    POST   /api/studio/discard    drop them
+    POST   /api/studio/reset      erase every Studio change stored on the keyboard
+    GET    /api/studio/status     {port, info} of the open keyboard, no probe
 
 The page is the React app under `dist/`, which is not in the repo - `make web`
 writes it, and the static route says so when it is missing.
@@ -102,7 +125,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
 from .. import (PROJECT_DIR, check, custom, firmware, flash, keyboards, keymap,
-               keypos, workspace)
+               keypos, studio, workspace)
 
 EMIT = {"viledance": custom.emit_viledance, "combo": custom.emit_combo,
         "modifier": custom.emit_modifier, "layer": custom.emit_layer,
@@ -128,6 +151,8 @@ CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript",
           ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2"}
 
 QUIET = False
+
+STUDIO = studio.Session()
 
 
 class Args:
@@ -194,6 +219,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": str(exc)})
             return self._send(200, {"files": files, "drives": flash.drives(),
                                     **firmware.firmware_state(name)})
+        if self.path.startswith("/api/studio/"):
+            return self._studio("GET", self.path[len("/api/studio/"):], {})
         if self.path == "/api/zmk/refs":
             url = (parse_qs(query).get("url") or [""])[0] or workspace.ZMK_URL
             try:
@@ -222,6 +249,9 @@ class Handler(BaseHTTPRequestHandler):
                     km["reset"] = custom.has_reset(own)
                     km["prep"] = (custom.prep_for(km["keyboard"], Args().zmk, own)
                                   if km.get("keyboard") else None)
+                    km["slots"] = custom.slots_of(custom._read(own))
+                    km["records"] = custom.read_manifest(custom._read(km["path"]))
+                    km["slot_map"] = firmware.slot_map(km["name"])
                     try:
                         km["firmware"] = firmware.firmware_state(km["name"])
                     except (ValueError, OSError):
@@ -229,6 +259,7 @@ class Handler(BaseHTTPRequestHandler):
             data["repo_path"] = PROJECT_DIR
             data["zmk"] = workspace.zmk_info()
             data["module_names"] = custom.module_names()
+            data["studio_keyboards"] = custom.studio_keyboards()
             data["build"] = firmware.docker_status()
             # `live` is what makes the write controls render at all.
             data["live"] = True
@@ -336,6 +367,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self._send(400, {"error": f"bad JSON: {exc}"})
 
+        if self.path.startswith("/api/studio/"):
+            return self._studio("POST", self.path[len("/api/studio/"):], rec)
         if self.path in ("/api/viledance", "/api/macro", "/api/combo",
                          "/api/modifier", "/api/layer"):
             kind = self.path.rsplit("/", 1)[1]
@@ -373,6 +406,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": str(exc)})
             return self._send(200, {"module_names": names})
 
+        if self.path == "/api/studio-keyboard":
+            try:
+                found = custom.set_studio_keyboard(str(rec.get("key") or ""),
+                                                   str(rec.get("id") or ""))
+            except (ValueError, OSError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(200, {"studio_keyboards": found})
+
         if self.path == "/api/import/inspect":
             return self._import_inspect(rec)
 
@@ -393,7 +434,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 text = (firmware.build_yaml(name, Args().zmk, bool(rec["reset"]),
                                             _parts_choice(rec.get("parts")),
-                                            **_prep_choice(rec))
+                                            **_prep_choice(rec),
+                                            slots=_slots_choice(rec))
                         if "reset" in rec else None)
                 firmware.JOB.start(name, yaml_text=text,
                                    rewrites=rec.get("rewrites") is not False)
@@ -424,12 +466,57 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send(404, {"error": "not found"})
 
+    def _studio(self, verb, what, rec):
+        """409 when nothing is connected; 410 when the keyboard went away."""
+        S = STUDIO
+        routes = {
+            ("GET", "ports"): lambda: {"ports": S.ports(), "connected": S.status()["port"]},
+            ("POST", "connect"): lambda: S.connect(rec.get("port") or None),
+            ("DELETE", "connect"): lambda: S.disconnect() or {},
+            ("GET", "lock"): lambda: S.run(lambda c: {"unlocked": c.unlocked(),
+                                                      "unsaved": c.unsaved()}),
+            ("GET", "keymap"): lambda: S.run(lambda c: c.keymap()),
+            ("GET", "behaviors"): lambda: {"behaviors": S.behavior_list()},
+            ("GET", "layouts"): lambda: S.run(lambda c: c.physical_layouts()),
+            ("POST", "binding"): lambda: S.run(lambda c: c.set_binding(
+                int(rec["layer_id"]), int(rec["position"]), int(rec["behavior"]),
+                int(rec.get("param1") or 0), int(rec.get("param2") or 0)) or {}),
+            ("POST", "layer"): lambda: S.run(lambda c: c.add_layer()),
+            ("POST", "layer/remove"): lambda: S.run(
+                lambda c: c.remove_layer(int(rec["index"])) or {}),
+            ("POST", "layer/restore"): lambda: S.run(
+                lambda c: c.restore_layer(int(rec["layer_id"]), int(rec["at"]))),
+            ("POST", "layer/name"): lambda: S.run(
+                lambda c: c.set_layer_name(int(rec["layer_id"]), str(rec["name"])) or {}),
+            ("POST", "layer/move"): lambda: S.run(
+                lambda c: c.move_layer(int(rec["start"]), int(rec["dest"]))),
+            ("POST", "save"): lambda: S.run(lambda c: c.save() or {}),
+            ("POST", "discard"): lambda: S.run(lambda c: c.discard() or {}),
+            ("POST", "reset"): lambda: S.run(lambda c: {"reset": c.reset_settings()}),
+            ("GET", "status"): lambda: S.status(),
+        }
+        fn = routes.get((verb, what))
+        if not fn:
+            return self._send(404, {"error": "not found"})
+        try:
+            return self._send(200, fn())
+        except studio.NotConnected as exc:
+            return self._send(409, {"error": str(exc)})
+        except studio.Gone as exc:
+            return self._send(410, {"error": str(exc)})
+        except studio.StudioError as exc:
+            return self._send(400, {"error": str(exc)})
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._send(400, {"error": f"bad request: {exc}"})
+
     def do_DELETE(self):
         if not self._guard():
             return
         self.path, _, query = self.path.partition("?")
         if self.path == "/api/build":
             return self._send(200, {"cancelled": firmware.JOB.cancel()})
+        if self.path == "/api/studio/connect":
+            return self._studio("DELETE", "connect", {})
         parts = self.path.strip("/").split("/")
         if len(parts) == 3 and parts[:2] == ["api", "module"]:
             try:
@@ -500,6 +587,11 @@ class Handler(BaseHTTPRequestHandler):
         new_layers = [{"name": nl.get("name") or ""}
                       for nl in (rec.get("new_layers") or [])]
         drop = [int(i) for i in (rec.get("drop_layers") or [])]
+        order = rec.get("layer_order")
+        order = [int(i) for i in order] if order else None
+        rename = {int(i): str(n) for i, n in (rec.get("rename_layers") or {}).items()}
+        # Indices count reserved layers, as the page's `km.layers` and ZMK's ids do.
+        unreserve = [int(i) for i in (rec.get("unreserve_layers") or [])]
         data = keymap.collect_data(Args())
         km = next((k for k in data["keymaps"] if k["id"] == base_id), None)
         if km is None:
@@ -518,11 +610,17 @@ class Handler(BaseHTTPRequestHandler):
                 key_count = (len(expanded[0]) if expanded
                             else (layouts[0]["count"] if layouts else 0))
                 expanded += [["&trans"] * key_count for _ in new_layers]
+            keys = (max((len(b) for b in expanded), default=0)
+                    or (layouts[0]["count"] if layouts else 0))
+            for i in unreserve or ():
+                if 0 <= i < len(expanded):
+                    expanded[i] = ["&trans"] * keys
             text, errors = custom.build_variant(
                 base_text, expanded, assignments,
                 store["viledance"], store["combo"], store["layer"],
                 macros=store["macro"], rows=rows,
-                new_layers=new_layers, scope=scope, drop=drop)
+                new_layers=new_layers, scope=scope, drop=drop,
+                order=order, rename=rename, unreserve=unreserve, keys=keys)
             header = (f"// zmk-keyboard: {km.get('keyboard') or ''}\n"
                       f"// variant of {km['path']} - written by VileMK\n")
             if not text.lstrip().startswith("// zmk-keyboard"):
@@ -530,7 +628,8 @@ class Handler(BaseHTTPRequestHandler):
             path, build_path, notes = custom.write_variant(
                 name, text, keyboard=km.get("keyboard") or "",
                 zmk_dir=Args().zmk, reset=bool(rec.get("reset")),
-                parts=_parts_choice(rec.get("parts")), **_prep_choice(rec))
+                parts=_parts_choice(rec.get("parts")), **_prep_choice(rec),
+                slots=_slots_choice(rec))
         except (custom.EmitError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"wrote": _rel(path),
@@ -622,9 +721,10 @@ class Handler(BaseHTTPRequestHandler):
                 if "reset" in q:
                     parts = json.loads((q.get("parts") or ["null"])[0])
                     choice = {k: (q[k][0] if k == "folder" else json.loads(q[k][0]))
-                              for k in ("folder", "entries", "confs") if k in q}
+                              for k in ("folder", "entries", "confs", "slots") if k in q}
                     text = firmware.build_yaml(name, Args().zmk, q["reset"][0] == "1",
-                                               _parts_choice(parts), **_prep_choice(choice))
+                                               _parts_choice(parts), **_prep_choice(choice),
+                                               slots=_slots_choice(choice))
                 out["targets"] = [t["artifact"] for t in
                                   firmware.targets(name, text, Args().zmk)]
                 out["rewrites"] = firmware.ci_rewrites(name, text, Args().zmk)
@@ -862,6 +962,7 @@ def _incoming(text: str):
             else:
                 status = "clash"
             rows.append({"kind": kind, "name": name, "status": status,
+                         "reserved": bool(rec.get("reserved")),
                          "incoming": custom.portable(rec),
                          "local": custom.portable(cur) if cur else None})
     return rows
@@ -900,7 +1001,7 @@ def _import_plan(rows, choices, renames):
             existing.add((kind, name))
             plan.append((kind, row["incoming"], ""))
         if _board_wide(kind, row["incoming"]):
-            scope_on.append((kind, final))
+            scope_on.append((kind, final, row.get("reserved", False)))
     return plan, scope_on, errors
 
 
@@ -941,6 +1042,13 @@ def _prep_choice(rec) -> dict:
             "entries": [str(e) for e in entries] if isinstance(entries, list) else None,
             "confs": ({str(k): bool(v) for k, v in confs.items()}
                       if isinstance(confs, dict) else None)}
+
+
+def _slots_choice(rec):
+    """The vile slots settings from the page: a dict, False for off, or None
+    (absent) to keep what the variant's build.yaml has."""
+    s = rec.get("slots")
+    return s if isinstance(s, dict) or s is False else None
 
 
 def _need(exc) -> dict:
@@ -984,17 +1092,21 @@ def _scoped_records():
 
 
 def _carry_scope(src: str, dst: str) -> None:
-    """Copy every on/off flag from one scope key to another."""
+    """Copy every on/off and reserved flag from one scope key to another."""
     if not src or not dst or src == dst:
         return
     for kind, rec in _scoped_records():
-        scopes = rec.get("scopes") or {}
-        on = bool(scopes.get(src))
-        if bool(scopes.get(dst)) == on:
-            continue
-        scopes[dst] = on
-        rec["scopes"] = scopes
-        custom.save(kind, rec)
+        changed = False
+        for field in ("scopes", "reserves"):
+            flags = rec.get(field) or {}
+            on = bool(flags.get(src))
+            if bool(flags.get(dst)) == on:
+                continue
+            flags[dst] = on
+            rec[field] = flags
+            changed = True
+        if changed:
+            custom.save(kind, rec)
 
 
 def _scope_on(scope: str, wanted) -> None:
@@ -1003,24 +1115,29 @@ def _scope_on(scope: str, wanted) -> None:
     An imported file carries its combos and conditional layers in the manifest
     because they were written into it, so they belong to the variant being
     written here whether the record was restored, renamed or already local.
+    Combos listed as reserved are reserved instead.
     """
-    want = {(k, custom.slug(n)) for k, n in wanted}
+    want = {(k, custom.slug(n)): reserved for k, n, reserved in wanted}
     for kind, rec in _scoped_records():
-        if (kind, custom.slug(rec.get("name", ""))) not in want:
+        key = (kind, custom.slug(rec.get("name", "")))
+        if key not in want:
             continue
-        scopes = rec.get("scopes") or {}
-        if scopes.get(scope):
+        field = "reserves" if want[key] else "scopes"
+        flags = rec.get(field) or {}
+        if flags.get(scope):
             continue
-        scopes[scope] = True
-        rec["scopes"] = scopes
+        flags[scope] = True
+        rec[field] = flags
         custom.save(kind, rec)
 
 
 def _forget_scope(scope: str) -> None:
     """Drop a scope key everywhere - the file it named is gone."""
     for kind, rec in _scoped_records():
-        if scope in (rec.get("scopes") or {}):
-            del rec["scopes"][scope]
+        hit = [f for f in ("scopes", "reserves") if scope in (rec.get(f) or {})]
+        for f in hit:
+            del rec[f][scope]
+        if hit:
             custom.save(kind, rec)
 
 

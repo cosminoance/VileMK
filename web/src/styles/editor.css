@@ -10,6 +10,7 @@
   letter-spacing:.06em;color:var(--muted)}
 .slot{display:flex;align-items:center;gap:14px;margin:9px 0}
 .slot > span{color:var(--muted);font-size:13px;text-align:right;width:120px;flex:none}
+.slot > span.path{width:auto;flex:1;min-width:0;text-align:left;overflow-wrap:anywhere}
 .kb{width:132px;height:46px;text-align:center;border:2px solid var(--key-line);
   border-radius:8px;background:var(--key);color:var(--ink);
   font:12px var(--font)}
@@ -56,7 +57,7 @@ pre.dts{background:var(--bg);border:1px solid var(--line);border-radius:6px;
 /* `components/Dropdown.tsx`: a button with its actions listed under it. */
 .drop{position:relative;display:inline-flex}
 .drop .caret{font-size:11px;margin-left:2px}
-.dropmenu{position:absolute;top:calc(100% + 4px);left:0;z-index:6;min-width:100%;
+.dropmenu{position:fixed;z-index:60;
   display:flex;flex-direction:column;padding:4px;background:var(--panel);
   border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.15)}
 .dropmenu button{padding:6px 10px;border:0;border-radius:6px;background:none;
@@ -66,13 +67,14 @@ pre.dts{background:var(--bg);border:1px solid var(--line);border-radius:6px;
 .dropmenu button.danger{color:var(--danger)}
 .dropmenu button:disabled{color:var(--muted);cursor:default;background:none}
 .dropmenu button small{display:block;font-size:11px;color:var(--muted)}
-.dropmenu.end{left:auto;right:0}
 button.ghost.sm{padding:3px 10px;font-size:12px;margin-left:6px}
 button.act.sm{padding:3px 12px;font-size:12px}
 .tdlist{display:flex;flex-wrap:wrap;gap:6px}
 .pk.td{width:auto;height:auto;min-height:38px;padding:4px 12px;align-items:flex-start;
   font-family:var(--font)}
 .pk.off{opacity:.4;pointer-events:none}
+.pk.na{opacity:.4;cursor:not-allowed}
+.pkedit:disabled,.picktabs button:disabled{opacity:.4;cursor:not-allowed}
 .picker{margin-top:14px;overflow-x:auto;padding-bottom:8px}
 .picker.hidden{display:none}
 .picker .prow{display:flex;gap:4px;margin-bottom:4px}
@@ -98,7 +100,7 @@ button.act.sm{padding:3px 12px;font-size:12px}
 .pkedit{border:1px solid var(--key-line);border-left:0;border-radius:0 5px 5px 0;
   background:var(--key);color:var(--muted);cursor:pointer;padding:0 8px;
   font:11px/1 var(--font)}
-.pkedit:hover{color:var(--accent);border-color:var(--accent)}
+.pkedit:hover:not(:disabled){color:var(--accent);border-color:var(--accent)}
 /* Was `#kb-picker > .hint`: the picker is a component now, not an id. */
 .picker > .hint{max-width:640px}
 .blist{display:flex;flex-direction:column;gap:6px;max-width:640px}
@@ -112,10 +114,21 @@ button.act.sm{padding:3px 12px;font-size:12px}
 .brow small{display:block;color:var(--muted);font-size:11px;
   font-family:var(--font)}
 .brow.sel{border-color:var(--accent);background:var(--accent-soft)}
-.tgl{width:54px;flex:none;border-radius:6px;cursor:pointer;font:inherit;font-size:11px;
+.tgl{width:84px;flex:none;border-radius:6px;cursor:pointer;font:inherit;font-size:11px;
   text-transform:uppercase;letter-spacing:.06em}
 .tgl.on{border:1px solid var(--combo);background:var(--combo-soft);color:var(--combo)}
 .tgl.off{border:1px solid var(--line);background:var(--bg);color:var(--muted)}
+.tgl.reserved{border:1px dashed var(--combo);background:var(--bg);color:var(--combo)}
+.seg{display:inline-flex;flex:none;align-self:center;border:1px solid var(--line);
+  border-radius:6px;overflow:hidden}
+.seg button{background:var(--bg);border:0;padding:5px 9px;cursor:pointer;font:inherit;
+  font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button:not(:disabled):not(.cur):hover{color:var(--ink)}
+.seg button:disabled{cursor:not-allowed;opacity:.4}
+.seg button.off.cur{background:var(--line);color:var(--ink)}
+.seg button.reserved.incl{background:var(--combo-soft);color:var(--combo)}
+.seg button.reserved.cur,.seg button.on.cur{background:var(--combo);color:var(--bg)}
 .modrow{display:flex;flex-wrap:wrap;gap:6px;margin:9px 0 0 134px}
 .msg{border-radius:6px;padding:6px 10px;margin:10px 0;font-size:12px}
 .msg.ok{background:var(--combo-soft);color:var(--combo)}
@@ -125,3 +138,4 @@ button.act.sm{padding:3px 12px;font-size:12px}
 .msg.notice .x{background:none;border:0;padding:0 4px;color:inherit;cursor:pointer;
   font:inherit;font-size:14px;line-height:1;opacity:.7}
 .msg.notice .x:hover{opacity:1}
+.slotcount{text-align:center;font-weight:700;font-size:14px;color:var(--ink)}

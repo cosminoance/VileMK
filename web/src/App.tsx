@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getState } from "./lib/api";
 import { byId } from "./lib/keymaps";
 import { KeymapView } from "./components/KeymapView";
+import { ModeSwitch, StudioView } from "./components/Studio";
 import { Sidebar } from "./components/Sidebar";
 import { VersionChip } from "./components/Changelog";
 import { ConfirmHost } from "./components/Confirm";
@@ -32,15 +33,17 @@ function Shell() {
         <span className="brand"><img src={logo} alt="VileMK" /></span>
         <span className="chips"><VersionChip /><SettingsChip /></span>
       </span>
+      <ModeSwitch />
       <span className="meta">
         {s.data.repo_path} &middot; generated {s.data.generated} &middot;{" "}
         {LIVE(s) ? "live · saving to custom/" : "read-only"}
       </span>
     </header>
-    <div className={s.rail ? "wrap" : "wrap closed"}>
-      <Sidebar />
-      <KeymapView />
-    </div>
+    {s.mode === "studio" ? <StudioView /> :
+      <div className={s.rail ? "wrap" : "wrap closed"}>
+        <Sidebar />
+        <KeymapView />
+      </div>}
     <ImportDialog />
     <ConfirmHost />
   </>;

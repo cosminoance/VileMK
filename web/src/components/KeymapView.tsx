@@ -7,7 +7,7 @@ import { LIVE, draftOf, useStore } from "../state/store";
 import { Board } from "./Board";
 import { KeyEditor } from "./KeyEditor";
 import { LayoutOrderWarn, LayoutSelect } from "./LayoutSelect";
-import { AddLayerButton, DeleteLayerButton } from "./LayerImport";
+import { AddLayerButton, DeleteLayerButton, RenameMoveLayer } from "./LayerImport";
 import { Menu } from "./Menu";
 import { Panel } from "./Panels";
 import { Tables } from "./Tables";
@@ -28,6 +28,10 @@ export function KeymapView() {
   const li = Math.min(s.layer, Math.max(allLayers.length - 1, 0));
   const layer = allLayers[li];
   const drops = s.dropLayers[km.id] || [];
+  const names = s.layerNames[km.id] || {};
+  const order = (s.layerOrder[km.id] || []).length === allLayers.length
+    ? s.layerOrder[km.id] : allLayers.map((_, i) => i);
+  const shownName = (i: number) => names[i] ?? allLayers[i]?.display ?? "";
   const gone = drops.includes(li);
   const drawn = !!layer && !layer.reserved && !gone;
   useEffect(() => { if (li !== s.layer) d({ t: "layer", n: li }); }, [li, s.layer, d]);
@@ -91,17 +95,23 @@ export function KeymapView() {
           disagree on layer count or key count</div>}
 
       <div className="tabs">
-        {allLayers.map((l, i) => (
-          <button key={i}
-                  className={[i === li && "sel", drops.includes(i) && "gone"]
-                               .filter(Boolean).join(" ")}
-                  title={drops.includes(i) ? "deleted when you save"
-                         : l.pending ? "not saved yet - Save as variant to write it"
-                         : undefined}
-                  onClick={() => d({ t: "layer", n: i })}>
-            {i}&nbsp;&middot;&nbsp;{l.display}{l.pending ? " *" : ""}
-          </button>
-        ))}
+        {order.map((i, at) => {
+          const l = allLayers[i];
+          const moved = at !== i;
+          return (
+            <button key={i}
+                    className={[i === li && "sel", drops.includes(i) && "gone"]
+                                 .filter(Boolean).join(" ")}
+                    title={drops.includes(i) ? "deleted when you save"
+                           : l.pending ? "not saved yet - Save as variant to write it"
+                           : moved ? `layer ${i} until you save`
+                           : i in names ? `${l.display} until you save`
+                           : undefined}
+                    onClick={() => d({ t: "layer", n: i })}>
+              {at}&nbsp;&middot;&nbsp;{shownName(i)}
+              {l.pending || moved || i in names ? " *" : ""}
+            </button>);
+        })}
         {live && allLayers.length < 32 &&
           <AddLayerButton km={km} />}
       </div>
@@ -120,6 +130,8 @@ export function KeymapView() {
             </Toggle>}
           {live &&
             <span className="end">
+              <RenameMoveLayer km={km} at={li} place={order.indexOf(li)}
+                               count={allLayers.length} name={shownName(li)} />
               <DeleteLayerButton km={km} at={li}
                                  left={allLayers.length - drops.length} />
             </span>}

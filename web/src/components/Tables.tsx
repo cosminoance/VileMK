@@ -1,8 +1,13 @@
 import { resolveBinding, usageOf } from "../lib/labels";
 import { useStore } from "../state/store";
 
-export function Tables({ km }: { km: any }) {
+/** Combos, behaviors and macros under the board. Studio passes a keymap built
+ *  from the keyboard, `layer` for the tab on screen, and `missing`: labels the
+ *  keyboard has that no file in `from` defines. */
+export function Tables({ km, layer, missing = [], from }:
+    { km: any; layer?: number; missing?: string[]; from?: string }) {
   const { s, d } = useStore();
+  const shown = layer ?? s.layer;
   const hot = (keys: number[] | null) => ({
     onMouseEnter: () => d({ t: "hot", keys }),
     onMouseLeave: () => d({ t: "hot", keys: null }),
@@ -27,7 +32,7 @@ export function Tables({ km }: { km: any }) {
           </tbody></table>
         </section>}
 
-      {!!km.behaviors.length &&
+      {!!(km.behaviors.length || missing.length) &&
         <section className="card">
           <h3>Behaviors</h3>
           <table><tbody>
@@ -53,7 +58,7 @@ export function Tables({ km }: { km: any }) {
                 .map(([k, v]) => k + "=" + v).join("  ");
               // The highlight only means something while that key's own layer
               // is the one on screen.
-              const rowHot = use && use.layer === s.layer ? hot([use.pos]) : {};
+              const rowHot = use && use.layer === shown ? hot([use.pos]) : {};
               return (
                 <tr key={b.label} className={use ? "usedby" : undefined} {...rowHot}>
                   <td className="mono">&amp;{b.label}</td>
@@ -70,6 +75,15 @@ export function Tables({ km }: { km: any }) {
                 </tr>
               );
             })}
+            {missing.map((l) => (
+              <tr key={l}>
+                <td className="mono">&amp;{l}</td>
+                <td></td>
+                <td style={{ color: "var(--muted)" }}>
+                  {from ? `on the keyboard, not in ${from}`
+                        : "on the keyboard; pick its keymap above to see what it does"}
+                </td>
+              </tr>))}
           </tbody></table>
         </section>}
 

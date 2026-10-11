@@ -6,7 +6,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
-import { buildChoices, choicesBody, type VendorConf } from "../lib/keymaps";
+import { bindsStudioUnlock, buildChoices, choicesBody, keyCount, type VendorConf } from "../lib/keymaps";
+import { slotDefaults } from "../lib/slots";
 import { useStore, type State } from "../state/store";
 import { ask } from "./Confirm";
 import { DriverList, fetchDrivers, type Driver, type Picked } from "./Drivers";
@@ -15,6 +16,7 @@ import { Fold } from "./Fold";
 import { Help } from "./Help";
 import { Toggle } from "./Toggle";
 import { Modal } from "./Modal";
+import { SlotsSheet } from "./Slots";
 
 const POLL_MS = 1000;
 
@@ -150,10 +152,11 @@ export function buildBlock(s: State, km: any): string | null {
 
 export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
   const { s, d } = useStore();
-  const [sheet, setSheet] = useState<"build" | "flash" | null>(null);
+  const [sheet, setSheet] = useState<"build" | "flash" | "slots" | null>(null);
   const own = km.kind === "variant";
   const choice = buildChoices(s, km);
-  const { reset, offered, parts, prep, folder, vendor, entries } = choice;
+  const { reset, offered, parts, prep, folder, vendor, entries, slots } = choice;
+  const noStudio = !bindsStudioUnlock(km);
   const block = own ? buildBlock(s, km) : null;
   const has = offered.filter((p) => parts[p.id]).map((p) => p.shield);
   const docker = s.data.build;
@@ -170,7 +173,7 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
     : noDocker ? "needs Docker"
     : block ? block
     : dirty ? "save first" : null;
-  const choices = [folder, reset ? "with reset" : "", ...has]
+  const choices = [folder, reset ? "with reset" : "", slots ? "vile slots" : "", ...has]
     .filter(Boolean).join(" \u00b7 ");
   const noFlash = own ? flashBlock(s, km) : "save as a variant first";
   return <>
@@ -194,6 +197,20 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
         <Help label="what include reset does">
           Also builds a reset firmware for the keyboard. Flash it (to both halves
           on a split) before the actual reflash.
+        </Help>
+        <span title={noStudio ? "Bind &studio_unlock on a key first: vile slots need ZMK Studio." : undefined}>
+          <Toggle checked={!!slots} disabled={!own || noStudio}
+                  onChange={(on) => d({ t: "slots", kmId: km.id,
+                                        slots: on ? km.slots || slotDefaults(keyCount(km)) : false })}>
+            include vile slots
+          </Toggle>
+        </span>
+        <button className="ghost sm" disabled={!slots} onClick={() => setSheet("slots")}>
+          Edit slots…</button>
+        <Help label="what vile slots are">
+          Adds a hidden layer of slots to the build. Viledances and combo outputs placed in
+          slots can then be changed from Studio mode with no build. Needs ZMK Studio, so
+          the keymap must bind &amp;studio_unlock.
         </Help>
         {/* The vendor's build list covers every way the keyboard is sold, so
             it names parts this one may not have. Only the user knows. */}
@@ -226,6 +243,7 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
                   confs={choice.confs} noFlash={noFlash}
                   close={() => setSheet(null)} flash={() => setSheet("flash")} />}
     {sheet === "flash" && <FlashSheet name={km.name} close={() => setSheet(null)} />}
+    {sheet === "slots" && <SlotsSheet km={km} close={() => setSheet(null)} />}
   </>;
 }
 

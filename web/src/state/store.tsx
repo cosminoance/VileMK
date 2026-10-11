@@ -4,6 +4,7 @@ import {
 } from "react";
 
 import { BLANK, isUnsaved, type Mode } from "../lib/drafts";
+import type { Slots } from "../lib/slots";
 import type { Importing } from "../lib/transfer";
 
 // ---------------------------------------------------------------- the state
@@ -26,6 +27,9 @@ import type { Importing } from "../lib/transfer";
 // changed from their defaults. Picking a folder drops the entry clicks, since
 // another folder offers other entries. Unclicked, `km.prep` has what the
 // variant's build.yaml has.
+//
+// `slots` holds the vile slots settings per keymap id once changed, false for
+// off. Unchanged, `km.slots` has what the variant's build.yaml records.
 //
 // `activeField` names the input the menu fills - the field's key, not the
 // element, so its value is read back out of the draft it belongs to. `null`
@@ -50,6 +54,8 @@ export interface State {
   filter: string;
   /** Sidebar open. Collapsing it gives the board the whole width. */
   rail: boolean;
+  /** Firmware edits the compiled keymap; Studio talks to a connected keyboard. */
+  mode: AppMode;
 
   id: string | null;
   layer: number;
@@ -61,6 +67,8 @@ export interface State {
   emode: Mode | null;
   drafts: Partial<Record<Mode, any>>;
   assign: Record<number, Record<number, string>>;
+  /** Studio keys sent since the keyboard's last save or discard, by layer id. */
+  studioPending: Record<number, Record<number, string>>;
   msg: Msg | null;
   dts: string | null;
   editing: number | null;
@@ -69,9 +77,14 @@ export interface State {
   newLayers: Record<string, { name: string }[]>;
   /** Layer indices marked for deletion, per keymap id, until the next save. */
   dropLayers: Record<string, number[]>;
+  /** Every layer index in its new order, per keymap id, until the next save. */
+  layerOrder: Record<string, number[]>;
+  /** New names by layer index, per keymap id, until the next save. */
+  layerNames: Record<string, Record<number, string>>;
   reset: Record<string, boolean>;
   parts: Record<string, Record<string, boolean>>;
   prep: Record<string, Prep>;
+  slots: Record<string, Slots | false>;
   /** The build panel under the variant bar is open. */
   build: boolean;
 
@@ -82,10 +95,12 @@ export interface State {
   imp: Importing | null;
 }
 
-// The keymap shown, the sidebar and the key-position toggle survive a reload.
+export type AppMode = "firmware" | "studio";
+
+// The keymap shown, the sidebar, the mode and the key-position toggle survive a reload.
 // Per browser; storage can be missing or refuse, and then the defaults apply.
 const VIEW = "vilemk.view";
-type View = Partial<Pick<State, "id" | "rail" | "nums">>;
+type View = Partial<Pick<State, "id" | "rail" | "mode" | "nums">>;
 function readView(): View {
   try { return JSON.parse(localStorage.getItem(VIEW) || "{}") || {}; }
   catch { return {}; }
@@ -99,11 +114,12 @@ export const initialState = (data: any): State => {
     store: data.custom || {viledance:[], combo:[], modifier:[], layer:[], macro:[]},
     filter: "",
     rail: v.rail ?? true,
+    mode: v.mode === "studio" ? "studio" : "firmware",
     id: known ? v.id! : (data.keymaps[0] || {}).id || null,
     layer: 0, layout: 0, base: "", nums: v.nums ?? true, hot: null,
-    emode: null, drafts: {}, assign: {}, msg: null, dts: null,
+    emode: null, drafts: {}, assign: {}, studioPending: {}, msg: null, dts: null,
     editing: null, picker: true, ptab: "keyboard",
-    newLayers: {}, dropLayers: {}, reset: {}, parts: {}, prep: {}, build: false,
+    newLayers: {}, dropLayers: {}, layerOrder: {}, layerNames: {}, reset: {}, parts: {}, prep: {}, slots: {}, build: false,
     activeField: null, keyVal: "",
     imp: null,
   };
@@ -111,15 +127,18 @@ export const initialState = (data: any): State => {
 
 export const LIVE = (s: State): boolean => !!s.data.live;
 
-/** New layers plus layers marked for deletion on keymap `id`. */
+/** New, deleted, renamed and moved layers on keymap `id`. */
 export const layerEdits = (s: State, id: string | null): number =>
-  id ? (s.newLayers[id] || []).length + (s.dropLayers[id] || []).length : 0;
+  id ? (s.newLayers[id] || []).length + (s.dropLayers[id] || []).length
+       + Object.keys(s.layerNames[id] || {}).length
+       + (s.layerOrder[id] || []).filter((n, i) => n !== i).length : 0;
 
 /** Edits that exist only in the page: assignments, new or deleted layers, and
  *  creation panel drafts that are neither blank nor a saved record as opened. */
 export const unsaved = (s: State): boolean =>
   Object.keys(s.assign).length > 0
-  || Object.keys({ ...s.newLayers, ...s.dropLayers }).some((id) => layerEdits(s, id) > 0)
+  || Object.keys({ ...s.newLayers, ...s.dropLayers, ...s.layerOrder, ...s.layerNames })
+       .some((id) => layerEdits(s, id) > 0)
   || (Object.keys(s.drafts) as Mode[]).some((m) => isUnsaved(s.store, m, s.drafts[m]));
 
 // --------------------------------------------------------------- the actions
@@ -128,6 +147,7 @@ export type Action =
   | { t: "store"; store: any }
   | { t: "filter"; v: string }
   | { t: "rail"; on: boolean }
+  | { t: "mode"; mode: AppMode }
   | { t: "select"; id: string | null }
   | { t: "layer"; n: number }
   | { t: "layout"; n: number }
@@ -139,6 +159,7 @@ export type Action =
   | { t: "picker"; on: boolean }
   | { t: "ptab"; tab: string }
   | { t: "reset"; kmId: string; on: boolean }
+  | { t: "slots"; kmId: string; slots: Slots | false }
   | { t: "part"; kmId: string; id: string; on: boolean }
   | { t: "prepFolder"; kmId: string; folder: string }
   | { t: "prepEntry"; kmId: string; id: string; on: boolean }
@@ -151,6 +172,7 @@ export type Action =
   | { t: "assign"; pos: number; v: string; close?: boolean; msg?: Msg | null }
   | { t: "swap"; from: number; to: number; file: (string | undefined)[] }
   | { t: "clearAssign"; kmId: string }
+  | { t: "studioPending"; pending: Record<number, Record<number, string>> }
   | { t: "openPanel"; mode: Mode; draft?: any }
   | { t: "closePanel" }
   | { t: "draft"; mode: Mode; draft: any | ((prev: any) => any) }
@@ -158,6 +180,9 @@ export type Action =
   | { t: "addLayer"; kmId: string; name: string; at: number;
       assign?: Record<number, string> }
   | { t: "dropLayer"; kmId: string; n: number; on: boolean }
+  | { t: "moveLayer"; kmId: string; n: number; by: number; count: number }
+  | { t: "renameLayer"; kmId: string; n: number; name: string; was: string;
+      fileCount: number }
   | { t: "savedVariant"; data: any; store: any; id: string | null;
       kmId: string; msg: Msg | null }
   | { t: "deletedKeymap"; data: any; store: any; kmId: string; msg: Msg | null }
@@ -171,6 +196,7 @@ export function reducer(s: State, a: Action): State {
     case "store": return { ...s, store: a.store };
     case "filter": return { ...s, filter: a.v };
     case "rail": return { ...s, rail: a.on };
+    case "mode": return { ...s, mode: a.mode };
 
     case "select":
       return { ...s, id: a.id, layer: 0, layout: 0, hot: null, msg: null };
@@ -184,7 +210,9 @@ export function reducer(s: State, a: Action): State {
     case "dts": return { ...s, dts: a.dts };
     case "picker": return { ...s, picker: a.on };
     case "ptab": return { ...s, ptab: a.tab };
+    case "studioPending": return { ...s, studioPending: a.pending };
     case "reset": return { ...s, reset: { ...s.reset, [a.kmId]: a.on } };
+    case "slots": return { ...s, slots: { ...s.slots, [a.kmId]: a.slots } };
     case "part":
       return { ...s, parts: { ...s.parts,
                               [a.kmId]: { ...s.parts[a.kmId], [a.id]: a.on } } };
@@ -248,7 +276,9 @@ export function reducer(s: State, a: Action): State {
     case "clearAssign":
       return { ...s, assign: {}, msg: null,
                newLayers: { ...s.newLayers, [a.kmId]: [] },
-               dropLayers: { ...s.dropLayers, [a.kmId]: [] } };
+               dropLayers: { ...s.dropLayers, [a.kmId]: [] },
+               layerOrder: { ...s.layerOrder, [a.kmId]: [] },
+               layerNames: { ...s.layerNames, [a.kmId]: {} } };
 
     // `+ New …`, a card's pencil and Resume all land here. Drafts are per
     // mode, so opening one kind never touches another kind's half-typed one.
@@ -289,7 +319,10 @@ export function reducer(s: State, a: Action): State {
       const assign = { ...s.assign };
       if (a.assign && Object.keys(a.assign).length) assign[a.at] = a.assign;
       else delete assign[a.at];
+      const order = s.layerOrder[a.kmId];
       return { ...s, layer: a.at, assign,
+               ...(order?.length
+                 ? { layerOrder: { ...s.layerOrder, [a.kmId]: [...order, a.at] } } : {}),
                newLayers: { ...s.newLayers,
                  [a.kmId]: [...(s.newLayers[a.kmId] || []), { name: a.name }] } };
     }
@@ -304,10 +337,39 @@ export function reducer(s: State, a: Action): State {
                  ? { editing: null, activeField: null, keyVal: "" } : {}) };
     }
 
+    // Like a deletion, a move only reorders the tabs: indices stay put until
+    // the save renumbers the file.
+    case "moveLayer": {
+      const cur = s.layerOrder[a.kmId];
+      const order = cur?.length === a.count ? [...cur]
+        : Array.from({ length: a.count }, (_, i) => i);
+      const at = order.indexOf(a.n), to = at + a.by;
+      if (at < 0 || to < 0 || to >= order.length) return s;
+      [order[at], order[to]] = [order[to], order[at]];
+      return { ...s, layerOrder: { ...s.layerOrder,
+                 [a.kmId]: order.every((n, i) => n === i) ? [] : order } };
+    }
+
+    // A layer added in this session takes the name itself; one from the file
+    // is renamed at the save.
+    case "renameLayer": {
+      if (a.n >= a.fileCount) {
+        const nl = [...(s.newLayers[a.kmId] || [])];
+        nl[a.n - a.fileCount] = { name: a.name };
+        return { ...s, newLayers: { ...s.newLayers, [a.kmId]: nl } };
+      }
+      const names = { ...s.layerNames[a.kmId] };
+      if (a.name === a.was) delete names[a.n];
+      else names[a.n] = a.name;
+      return { ...s, layerNames: { ...s.layerNames, [a.kmId]: names } };
+    }
+
     case "savedVariant":
       return { ...s, data: a.data, store: a.store, msg: a.msg,
                assign: {}, newLayers: { ...s.newLayers, [a.kmId]: [] },
                dropLayers: { ...s.dropLayers, [a.kmId]: [] },
+               layerOrder: { ...s.layerOrder, [a.kmId]: [] },
+               layerNames: { ...s.layerNames, [a.kmId]: {} },
                ...(a.id ? { id: a.id, layer: 0 } : {}) };
 
     case "imp": return { ...s, imp: a.imp };
@@ -323,8 +385,11 @@ export function reducer(s: State, a: Action): State {
       const newLayers = { ...s.newLayers }, dropLayers = { ...s.dropLayers };
       delete newLayers[a.kmId];
       delete dropLayers[a.kmId];
+      const layerOrder = { ...s.layerOrder }, layerNames = { ...s.layerNames };
+      delete layerOrder[a.kmId];
+      delete layerNames[a.kmId];
       return { ...s, data: a.data, store: a.store, msg: a.msg,
-               assign: {}, newLayers, dropLayers,
+               assign: {}, newLayers, dropLayers, layerOrder, layerNames,
                id: (a.data.keymaps[0] || {}).id || null, layer: 0, layout: 0 };
     }
   }
@@ -337,9 +402,9 @@ export function StoreProvider({ data, children }:
     { data: any; children: ReactNode }) {
   const [s, d] = useReducer(reducer, data, initialState);
   useEffect(() => {
-    try { localStorage.setItem(VIEW, JSON.stringify({ id: s.id, rail: s.rail, nums: s.nums })); }
+    try { localStorage.setItem(VIEW, JSON.stringify({ id: s.id, rail: s.rail, mode: s.mode, nums: s.nums })); }
     catch { /* no storage: the defaults apply next time */ }
-  }, [s.id, s.rail, s.nums]);
+  }, [s.id, s.rail, s.mode, s.nums]);
   return <Ctx.Provider value={{ s, d }}>{children}</Ctx.Provider>;
 }
 

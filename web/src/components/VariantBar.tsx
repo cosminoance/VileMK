@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { buildChoices, choicesBody, choicesChanged, slugify } from "../lib/keymaps";
 import { layersOf } from "../lib/layers";
 import { deleteVariant, saveVariant } from "../state/actions";
-import { reducer, useStore, type Action, type State } from "../state/store";
+import { layerEdits, reducer, useStore, type Action, type State } from "../state/store";
 import { BuildPanel } from "./Build";
 import { Dropdown } from "./Dropdown";
 import { Modal } from "./Modal";
@@ -20,7 +20,8 @@ export function VariantBar({ km }: { km: any }) {
     .reduce((a, o) => a + Object.keys(o).length, 0);
   const nl = (s.newLayers[km.id] || []).length;
   const dl = (s.dropLayers[km.id] || []).length;
-  const dirty = n || nl || dl;
+  const ml = layerEdits(s, km.id) - nl - dl;
+  const dirty = n || nl || dl || ml;
   const choices = choicesBody(buildChoices(s, km));
   // Text typed into the key editor but not applied goes into the save, as Enter
   // would have put it there. Blank text, or what the key already holds, does not.
@@ -45,7 +46,7 @@ export function VariantBar({ km }: { km: any }) {
     if (saving.current || document.querySelector(".modal")) return;
     if (!own) return setAsking(true);
     const st = withKey();
-    if (!Object.keys(st.assign).length && !nl && !dl && !choicesChanged(st, km))
+    if (!Object.keys(st.assign).length && !nl && !dl && !ml && !choicesChanged(st, km))
       return d({ t: "msg", msg: { text: "nothing to save" } });
     saving.current = true;
     await save(km.name, km.name, st);
@@ -69,6 +70,7 @@ export function VariantBar({ km }: { km: any }) {
         <span className="path">
           {n} pending change(s){nl ? `, ${nl} new layer(s)` : ""}
           {dl ? `, ${dl} layer(s) to delete` : ""}
+          {ml ? `, ${ml} layer(s) renamed or moved` : ""}
         </span>}
       {own
         ? <Dropdown label="Save" items={[
@@ -84,7 +86,7 @@ export function VariantBar({ km }: { km: any }) {
         <button className="ghost danger"
                 onClick={() => deleteVariant(s, d, km)}>Delete variant</button>}
     </div>
-    <BuildPanel km={km} dirty={n + nl + dl} />
+    <BuildPanel km={km} dirty={n + nl + dl + ml} />
     {s.msg && <Notice msg={s.msg} close={() => d({ t: "msg", msg: null })} />}
     {asking &&
       <SaveAsSheet start={slugify(km.name) + (own ? "_2" : "_custom")} from={km.name}
@@ -93,7 +95,7 @@ export function VariantBar({ km }: { km: any }) {
 }
 
 function SaveAsSheet({ start, from, save, close }:
-    { start: string; from: string; save: (name: string) => Promise<boolean>;
+    { start: string; from: string; save: (name: string) => Promise<string | null | false>;
       close: () => void }) {
   const { s } = useStore();
   const [name, setName] = useState(start);
@@ -104,7 +106,7 @@ function SaveAsSheet({ start, from, save, close }:
     const ok = await save(name);
     setBusy(false);
     setTried(true);
-    if (ok) close();
+    if (ok !== false) close();
   };
   return (
     <Modal onClose={busy ? undefined : close} className="saveas"

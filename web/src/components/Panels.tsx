@@ -3,7 +3,7 @@
 // panel for one of the six kinds. Opening either closes the other - there is
 // nowhere to put two.
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useContext, useState, type ReactNode } from "react";
 
 import { MODS, MOD_LABELS, modChainText } from "../lib/bindings";
 import {
@@ -11,9 +11,12 @@ import {
   type Mode,
 } from "../lib/drafts";
 import { applyField } from "../lib/fields";
+import { buildChoices, byId } from "../lib/keymaps";
 import { layersOf } from "../lib/layers";
+import { offTiming, vdShape } from "../lib/slots";
 import { deleteItem, previewItem, saveItem } from "../state/actions";
 import { draftOf, useStore } from "../state/store";
+import { StudioPickCtx } from "./Picker";
 
 // ------------------------------------------------------------- the plumbing
 interface Bound {
@@ -91,9 +94,11 @@ function Name({ b, ph }: { b: Bound; ph: string }) {
 
 function Buttons({ mode, draft }: { mode: Mode; draft: any }) {
   const { s, d } = useStore();
+  const sp = useContext(StudioPickCtx);
   return (
     <div className="rowbtns">
-      <button className="act" onClick={() => saveItem(s, d, mode, draft)}>Save</button>
+      <button className="act" onClick={() => sp ? sp.saveRecord(mode, draft)
+                                              : saveItem(s, d, mode, draft)}>Save</button>
       <button className="ghost" onClick={() => previewItem(d, mode, draft)}>Devicetree</button>
       <button className="ghost" onClick={() => d({ t: "closePanel" })}>Close</button>
       <button className="ghost danger" onClick={() => deleteItem(d, mode, draft)}>Delete</button>
@@ -114,8 +119,20 @@ const Shell = ({ mode, draft, children }:
 export function ViledancePanel() {
   const b = useBound("viledance");
   const d = b.draft;
+  const { s } = useStore();
+  const sp = useContext(StudioPickCtx);
+  const km = byId(s.data.keymaps, s.id);
+  // The timing slot viledances share: the keyboard's in Studio, else the variant's build.
+  const pool = sp ? sp.slots
+    : km?.kind === "variant" ? buildChoices(s, km).slots || null : null;
   return (
     <Shell mode="viledance" draft={d}>
+      {pool && vdShape(d) && !!offTiming([d], pool).length &&
+        <div className="warn">{sp ? "This keyboard's" : `${km.name}'s`} vile slots use
+          {" "}{pool.term} ms, {pool.flavor}{vdShape(d) === "four" ? ` / ${pool.flavor2}` : ""}.
+          In slots this viledance uses that timing, not its own.</div>}
+      {sp && <div className="hint">Save puts it on the keyboard's vile slots as well as in
+        custom/. Keys already bound to it change at once.</div>}
       <Name b={b} ph="e.g. bkspshift" />
       {SLOTS.map(([k, lbl]) => (
         <Slot key={k} label={lbl}>
@@ -235,8 +252,12 @@ export function MacroPanel() {
 export function ComboPanel() {
   const b = useBound("combo");
   const d = b.draft;
+  const sp = useContext(StudioPickCtx);
   return (
     <Shell mode="combo" draft={d}>
+      {sp && <div className="hint">Save sends the output key to the keyboard's vile slot.
+        Keys, timeout and layers are part of the build: they are saved in custom/ and
+        reach the keyboard with the next build and flash.</div>}
       <Name b={b} ph="e.g. jk_quote" />
       <Slot label="Keys">
         <NumList b={b} f="key_positions" ph="click the board above"

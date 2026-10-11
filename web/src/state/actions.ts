@@ -18,18 +18,24 @@ const bad = (e: unknown) => ({ text: (e as Error).message, bad: true });
 // A brand-new board-wide record is switched on for the keymap it was designed
 // against and nowhere else - that is the "off unless you say so" rule, minus
 // the pointless step of switching on the one you are obviously making it for.
-// An existing record's scopes are left exactly as they are.
-export async function saveItem(s: State, d: D, mode: Mode, draft: any) {
+// An existing record keeps the scopes and reserves it has on disk, since the
+// switch may have changed them while the draft was open.
+export async function saveItem(s: State, d: D, mode: Mode, draft: any): Promise<boolean> {
   const kind = KIND_OF[mode];
+  const old = recordOf(s.store, mode, draft.name);
   let body = { ...draft, kind };
-  if (BOARD_TABS.includes(mode) && !recordOf(s.store, mode, draft.name)) {
+  if (old && BOARD_TABS.includes(mode))
+    body = { ...body, scopes: old.scopes || {},
+             ...(old.reserves ? { reserves: old.reserves } : {}) };
+  if (BOARD_TABS.includes(mode) && !old) {
     const scope = scopeOf(byId(s.data.keymaps, s.id));
     if (scope) body = { ...body, scopes: { ...(draft.scopes || {}), [scope]: true } };
   }
   try {
     const r = await api("POST", "/api/" + kind, body);
     d({ t: "leavePanel", mode, store: r.custom, msg: { text: "saved " + r.saved } });
-  } catch (e) { d({ t: "msg", msg: bad(e) }); }
+    return true;
+  } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
 }
 
 export async function previewItem(d: D, mode: Mode, draft: any) {
@@ -69,6 +75,29 @@ export async function toggleScope(s: State, d: D, mode: Mode, name: string) {
   } catch (e) { d({ t: "msg", msg: bad(e) }); }
 }
 
+export type ComboState = "on" | "reserved" | "off";
+
+// A combo's three states for one keymap: `scopes` says on, `reserves` says
+// built into vile slots with `&none`. `scope` defaults to the selected keymap's.
+export async function setComboState(s: State, d: D, name: string, state: ComboState,
+                                    scope = scopeOf(byId(s.data.keymaps, s.id))) {
+  const rec = recordOf(s.store, "combo", name);
+  if (!rec) return false;
+  if (!scope) {
+    d({ t: "msg", msg: { text: "pick a keyboard first", bad: true } });
+    return false;
+  }
+  try {
+    const r = await api("POST", "/api/combo", {
+      ...rec, kind: "combo",
+      scopes: { ...(rec.scopes || {}), [scope]: state === "on" },
+      reserves: { ...(rec.reserves || {}), [scope]: state === "reserved" } });
+    d({ t: "store", store: r.custom });
+    d({ t: "msg", msg: { text: `${rec.name} is now ${state} for ${scope}` } });
+    return true;
+  } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
+}
+
 // A card on the VileDance, Modifiers or Layers tab is not a finished binding
 // until the server says what label it will be emitted under, so picking one is
 // a round trip. Null means the call failed and the message is already out.
@@ -88,10 +117,13 @@ export async function previewBinding(d: D, kind: string, rec: any): Promise<stri
 // `parts` is `{part_id: bool}` for the add-on shields; the build.yaml keeps the
 // ticked ones (`build_yaml_for(parts=)`). `choices` carries both, plus a
 // prepared module's folder, entries and confs (`choicesBody()`).
+// `edits` replaces the Firmware pending edits (Studio's write-back); then the
+// Firmware selection and its pending state are left alone. Resolves to the
+// written keymap's id (null when it is not listed), or false.
 export async function saveVariant(
   s: State, d: D, km: any, over: string | null, typed: string,
-  choices: Record<string, unknown>,
-): Promise<boolean> {
+  choices: Record<string, unknown>, edits?: Record<string, unknown>,
+): Promise<string | null | false> {
   const name = over || typed.trim();
   if (!name) {
     d({ t: "msg", msg: { text: "give the variant a name", bad: true } });
@@ -108,7 +140,9 @@ export async function saveVariant(
                         { name, base: km.id, assignments: s.assign,
                           scope: scopeOf(km), ...choices,
                           new_layers: s.newLayers[km.id] || [],
-                          drop_layers: s.dropLayers[km.id] || [] });
+                          drop_layers: s.dropLayers[km.id] || [],
+                          layer_order: s.layerOrder[km.id] || [],
+                          rename_layers: s.layerNames[km.id] || {}, ...edits });
     // Pull the fresh keymap list so the new file shows up in "Saved variations"
     // without a page reload, and jump straight to it - matching by filename
     // since `r.wrote` is project-relative while a keymap's `id` carries the
@@ -117,14 +151,21 @@ export async function saveVariant(
     const fn = r.wrote.split("/").pop();
     const created = fresh.keymaps.find(
       (k: any) => k.kind === "variant" && k.path.split("/").pop() === fn);
+    const msg = { text: `wrote ${r.folder || r.wrote}`
+                    + (r.build ? " (keymap + build.yaml)" : "")
+                    + (r.warnings && r.warnings.length ? " - " + r.warnings.join("; ") : "") };
+    if (edits) {
+      d({ t: "data", data: fresh });
+      d({ t: "store", store: fresh.custom || r.custom || s.store });
+      d({ t: "msg", msg });
+      await showNotices(r);
+      return created ? created.id : null;
+    }
     // A variant is a folder: the keymap, and the build.yaml that builds it.
     d({ t: "savedVariant", data: fresh, store: fresh.custom || r.custom || s.store,
-        id: created ? created.id : null, kmId: km.id,
-        msg: { text: `wrote ${r.folder || r.wrote}`
-                 + (r.build ? " (keymap + build.yaml)" : "")
-                 + (r.warnings && r.warnings.length ? " - " + r.warnings.join("; ") : "") } });
+        id: created ? created.id : null, kmId: km.id, msg });
     await showNotices(r);
-    return true;
+    return created ? created.id : null;
   } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
 }
 

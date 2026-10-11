@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { recordLabels } from "../lib/cards";
 import { keyCount, slugify } from "../lib/keymaps";
@@ -58,6 +58,50 @@ export function DeleteLayerButton({ km, at, left }:
       their numbers.
     </Help>
   </>;
+}
+
+/** Rename and move-one-place buttons for the layer on screen. Each mode passes
+ *  its own handlers; `children` is the mode's Help. */
+export function LayerNameMove({ name, onRename, onMove, left, right, disabled,
+                                maxLength, children }:
+    { name: string; onRename: (name: string) => void; onMove: (by: number) => void;
+      left: boolean; right: boolean; disabled?: boolean; maxLength?: number;
+      children?: ReactNode }) {
+  const rename = async () => {
+    const v = await askText({ title: "Rename layer", ok: "Rename",
+      field: { value: name, placeholder: "layer name" } });
+    if (v && v !== name) onRename(maxLength ? v.slice(0, maxLength) : v);
+  };
+  return <>
+    <button className="ghost sm" disabled={disabled} onClick={rename}>Rename</button>
+    <button className="ghost sm" disabled={disabled || !left} title="move one place left"
+            aria-label="move layer left" onClick={() => onMove(-1)}>&larr;</button>
+    <button className="ghost sm" disabled={disabled || !right} title="move one place right"
+            aria-label="move layer right" onClick={() => onMove(1)}>&rarr;</button>
+    {children}
+  </>;
+}
+
+/** Firmware's rename and move: pending until the save, like a deletion. `at`
+ *  is the layer's index, `place` where it stands in the pending order. */
+export function RenameMoveLayer({ km, at, place, count, name }:
+    { km: any; at: number; place: number; count: number; name: string }) {
+  const { s, d } = useStore();
+  const was = layersOf(km, s.newLayers[km.id], s.layout)[at]?.display ?? name;
+  return (
+    <LayerNameMove name={name} left={place > 0} right={place < count - 1}
+                   onRename={(v) => d({ t: "renameLayer", kmId: km.id, n: at, name: v,
+                                        was, fileCount: km.layers.length })}
+                   onMove={(by) => d({ t: "moveLayer", kmId: km.id, n: at, by, count })}>
+      <Help label="what renaming and moving a layer do">
+        Both happen when you save. Renaming changes the layer's node name and its
+        display-name. Moving renumbers the layers in between, and keys, combos and
+        conditional layers in this keymap that name them by number follow. Layer 0
+        is the one the keyboard starts on. Saved layer-tap and combo entries are
+        shared between keymaps and keep their numbers.
+      </Help>
+    </LayerNameMove>
+  );
 }
 
 /** The saved variations a layer can be copied from: every one but `km`. */
