@@ -14,6 +14,7 @@ import { layerRows, layersOf, ltCode } from "../lib/layers";
 import {
   macroBinding, macroSummary, macroTitle, usesVd, vdTitle,
 } from "../lib/cards";
+import type { Slots } from "../lib/slots";
 import { previewBinding, toggleScope } from "../state/actions";
 import { draftOf, useStore } from "../state/store";
 
@@ -34,10 +35,17 @@ export interface StudioPick {
   /** Why a binding cannot go on this keyboard, or null when it can. */
   why: (v: string) => string | null;
   layers: [number, string][];
+  /** Why a saved thing of this kind (or this one) cannot be made or edited here,
+   *  null when it can: viledances and combo outputs on a keyboard with vile slots. */
+  slotWhy: (mode: Mode, name?: string) => string | null;
+  /** The panel's Save: the record, then its slots on the keyboard. */
+  saveRecord: (mode: Mode, draft: any) => void;
+  /** The keyboard's slot timing, when it has vile slots. */
+  slots: Slots | null;
 }
 export const StudioPickCtx = createContext<StudioPick | null>(null);
 
-const BUILD_TIP = "Studio cannot add behaviors to the keyboard. Create or edit "
+export const BUILD_TIP = "Studio cannot add behaviors to the keyboard. Create or edit "
   + "this in Firmware mode, build and flash, and it can be bound here.";
 
 // ----------------------------------------------------------- filling a field
@@ -50,7 +58,9 @@ export function usePick() {
   const { s, d } = useStore();
   const sp = useContext(StudioPickCtx);
   const field = activeFieldOf(s);
-  if (sp) return { pick: sp.pick, setField: sp.setField, field: KEY_FIELD, cur: sp.cur };
+  // In Studio a pick goes to the key, unless a panel is open and no key is.
+  if (sp && !(s.emode && sp.editing === null))
+    return { pick: sp.pick, setField: sp.setField, field: KEY_FIELD, cur: sp.cur };
 
   const setField = (v: string) => {
     if (!field)
@@ -162,7 +172,8 @@ export function NewRow({ mode, label: lbl }: { mode: Mode; label: string }) {
                 onClick={() => d({ t: "openPanel", mode })}>
           Resume {draft.name || "unnamed " + lbl}…
         </button>}
-      <button type="button" className="ghost sm" disabled={!!sp} title={sp ? BUILD_TIP : undefined}
+      <button type="button" className="ghost sm" disabled={!!sp?.slotWhy(mode)}
+              title={sp?.slotWhy(mode) || undefined}
               onClick={() => d({ t: "openPanel", mode, draft: BLANK[mode]() })}>
         + New {lbl}…
       </button>
@@ -176,9 +187,10 @@ function CardEdit({ mode, name }: { mode: Mode; name: string }) {
   const { s, d } = useStore();
   const sp = useContext(StudioPickCtx);
   const rec = recordOf(s.store, mode, name);
+  const why = sp?.slotWhy(mode, name);
   return (
-    <button type="button" className="pkedit" disabled={!!sp}
-            title={sp ? BUILD_TIP : "edit " + name}
+    <button type="button" className="pkedit" disabled={!!why}
+            title={why || "edit " + name}
             onClick={() => rec && d({ t: "openPanel", mode,
                                       draft: JSON.parse(JSON.stringify(rec)) })}>
       ✎
@@ -377,20 +389,22 @@ export function LayerTab({ cur }: { cur: string }) {
 function BRow({ mode, r, sub, scope }:
     { mode: Mode; r: any; sub: string; scope: string }) {
   const { s, d } = useStore();
+  const sp = useContext(StudioPickCtx);
+  const why = sp?.slotWhy(mode, r.name);
   const on = scopeOn(r, scope);
   const open = s.emode === mode && (draftOf(s, mode).name || "") === r.name;
   const elsewhere = Object.keys(r.scopes || {})
     .filter((k) => r.scopes[k] && k !== scope);
   return (
     <div className={"brow" + (on ? "" : " off") + (open ? " sel" : "")}>
-      <button type="button" className={"tgl " + (on ? "on" : "off")}
-              title={(on ? "written into this keymap's variant"
+      <button type="button" className={"tgl " + (on ? "on" : "off")} disabled={!!sp}
+              title={sp ? BUILD_TIP : (on ? "written into this keymap's variant"
                          : "left out of this keymap's variant")
                      + (elsewhere.length ? "\n\nalso on for: " + elsewhere.join(", ") : "")}
               onClick={() => toggleScope(s, d, mode, r.name)}>
         {on ? "On" : "Off"}
       </button>
-      <button type="button" className="bopen"
+      <button type="button" className="bopen" disabled={!!why} title={why || undefined}
               onClick={() => d({ t: "openPanel", mode,
                                  draft: JSON.parse(JSON.stringify(r)) })}>
         <span className="nm">{r.name}</span><small>{sub}</small>
@@ -437,6 +451,16 @@ function BoardList({ mode, items, sub, label: lbl }:
 
 export function ComboTab() {
   const { s } = useStore();
+  const sp = useContext(StudioPickCtx);
+  if (sp) return <>
+    <div className="hint">
+      A combo whose output sits in a vile slot can have its output changed here, straight
+      on the keyboard. Its keys, timeout and layers are part of the build. Combos that are
+      not in slots are dimmed.
+    </div>
+    <BoardList mode="combo" items={s.store.combo || []} label="combo"
+               sub={(r) => `${(r.key_positions || []).join(" + ")} → ${r.binding || "?"}`} />
+  </>;
   return <>
     <div className="hint">
       A combo is <b>board-wide</b>: press two or more keys together, anywhere. It

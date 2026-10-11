@@ -1,0 +1,13 @@
+# Part of VileMK; see LICENSE at the repository root.
+
+description: Runs the binding stored at one position of a layer nothing activates.
+
+compatible: "zmk,behavior-vile-slot"
+
+include: one_param.yaml
+
+properties:
+  layer:
+    type: int
+    required: true
+    description: Layer id of the slots layer; the parameter is a key position on it.

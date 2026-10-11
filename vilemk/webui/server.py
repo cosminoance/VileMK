@@ -29,7 +29,8 @@ Endpoints:
                                   `reset: true` adds the settings_reset entries,
                                   `parts` picks the add-on shields, `folder`,
                                   `entries` and `confs` are a prepared module's
-                                  choices)
+                                  choices, `slots` the vile slots settings or
+                                  false)
     DELETE /api/variant/<name>    remove variants/<name>/
     POST   /api/import/inspect    read a shared keymap, report record collisions
                                   and, for a keyboard not added here, the module
@@ -65,8 +66,8 @@ Endpoints:
                                   `variants` while variants build it
     POST   /api/build             start building one variant ({name}); with
                                   `reset` (and `parts`, `folder`, `entries`,
-                                  `confs`) it rewrites the variant's build.yaml
-                                  from those choices first; `rewrites: false`
+                                  `confs`, `slots`) it rewrites the variant's
+                                  build.yaml from those choices first; `rewrites: false`
                                   skips the modules' CI keymap edits
     POST   /api/build/open        open the variant's firmware folder ({name})
                                   in the system file manager
@@ -74,7 +75,8 @@ Endpoints:
                                   (`variant=` names whose targets and files to list;
                                   `reset=0|1&parts=<json>` lists the targets those
                                   choices would build, as do `folder=`,
-                                  `entries=<json>` and `confs=<json>`; `rewrites`
+                                  `entries=<json>`, `confs=<json>` and
+                                  `slots=<json>`; `rewrites`
                                   lists the CI keymap edits the build would make,
                                   `drivers` what its prepared modules' own builds
                                   fetch that west.yml lacks)
@@ -97,9 +99,11 @@ Endpoints:
     POST   /api/studio/layer/remove   {index}: take a layer out until discard
     POST   /api/studio/layer/restore  {layer_id, at}: put a removed one back
     POST   /api/studio/layer/name     {layer_id, name}
+    POST   /api/studio/layer/move     {start, dest} (indices): the keymap after
     POST   /api/studio/save       write pending changes to the keyboard's flash
     POST   /api/studio/discard    drop them
     POST   /api/studio/reset      erase every Studio change stored on the keyboard
+    GET    /api/studio/status     {port, info} of the open keyboard, no probe
 
 The page is the React app under `dist/`, which is not in the repo - `make web`
 writes it, and the static route says so when it is missing.
@@ -245,6 +249,9 @@ class Handler(BaseHTTPRequestHandler):
                     km["reset"] = custom.has_reset(own)
                     km["prep"] = (custom.prep_for(km["keyboard"], Args().zmk, own)
                                   if km.get("keyboard") else None)
+                    km["slots"] = custom.slots_of(custom._read(own))
+                    km["records"] = custom.read_manifest(custom._read(km["path"]))
+                    km["slot_map"] = firmware.slot_map(km["name"])
                     try:
                         km["firmware"] = firmware.firmware_state(km["name"])
                     except (ValueError, OSError):
@@ -427,7 +434,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 text = (firmware.build_yaml(name, Args().zmk, bool(rec["reset"]),
                                             _parts_choice(rec.get("parts")),
-                                            **_prep_choice(rec))
+                                            **_prep_choice(rec),
+                                            slots=_slots_choice(rec))
                         if "reset" in rec else None)
                 firmware.JOB.start(name, yaml_text=text,
                                    rewrites=rec.get("rewrites") is not False)
@@ -480,9 +488,12 @@ class Handler(BaseHTTPRequestHandler):
                 lambda c: c.restore_layer(int(rec["layer_id"]), int(rec["at"]))),
             ("POST", "layer/name"): lambda: S.run(
                 lambda c: c.set_layer_name(int(rec["layer_id"]), str(rec["name"])) or {}),
+            ("POST", "layer/move"): lambda: S.run(
+                lambda c: c.move_layer(int(rec["start"]), int(rec["dest"]))),
             ("POST", "save"): lambda: S.run(lambda c: c.save() or {}),
             ("POST", "discard"): lambda: S.run(lambda c: c.discard() or {}),
             ("POST", "reset"): lambda: S.run(lambda c: {"reset": c.reset_settings()}),
+            ("GET", "status"): lambda: S.status(),
         }
         fn = routes.get((verb, what))
         if not fn:
@@ -576,6 +587,11 @@ class Handler(BaseHTTPRequestHandler):
         new_layers = [{"name": nl.get("name") or ""}
                       for nl in (rec.get("new_layers") or [])]
         drop = [int(i) for i in (rec.get("drop_layers") or [])]
+        order = rec.get("layer_order")
+        order = [int(i) for i in order] if order else None
+        rename = {int(i): str(n) for i, n in (rec.get("rename_layers") or {}).items()}
+        # Indices count reserved layers, as the page's `km.layers` and ZMK's ids do.
+        unreserve = [int(i) for i in (rec.get("unreserve_layers") or [])]
         data = keymap.collect_data(Args())
         km = next((k for k in data["keymaps"] if k["id"] == base_id), None)
         if km is None:
@@ -594,11 +610,17 @@ class Handler(BaseHTTPRequestHandler):
                 key_count = (len(expanded[0]) if expanded
                             else (layouts[0]["count"] if layouts else 0))
                 expanded += [["&trans"] * key_count for _ in new_layers]
+            keys = (max((len(b) for b in expanded), default=0)
+                    or (layouts[0]["count"] if layouts else 0))
+            for i in unreserve or ():
+                if 0 <= i < len(expanded):
+                    expanded[i] = ["&trans"] * keys
             text, errors = custom.build_variant(
                 base_text, expanded, assignments,
                 store["viledance"], store["combo"], store["layer"],
                 macros=store["macro"], rows=rows,
-                new_layers=new_layers, scope=scope, drop=drop)
+                new_layers=new_layers, scope=scope, drop=drop,
+                order=order, rename=rename, unreserve=unreserve, keys=keys)
             header = (f"// zmk-keyboard: {km.get('keyboard') or ''}\n"
                       f"// variant of {km['path']} - written by VileMK\n")
             if not text.lstrip().startswith("// zmk-keyboard"):
@@ -606,7 +628,8 @@ class Handler(BaseHTTPRequestHandler):
             path, build_path, notes = custom.write_variant(
                 name, text, keyboard=km.get("keyboard") or "",
                 zmk_dir=Args().zmk, reset=bool(rec.get("reset")),
-                parts=_parts_choice(rec.get("parts")), **_prep_choice(rec))
+                parts=_parts_choice(rec.get("parts")), **_prep_choice(rec),
+                slots=_slots_choice(rec))
         except (custom.EmitError, ValueError) as exc:
             return self._send(400, {"error": str(exc)})
         return self._send(200, {"wrote": _rel(path),
@@ -698,9 +721,10 @@ class Handler(BaseHTTPRequestHandler):
                 if "reset" in q:
                     parts = json.loads((q.get("parts") or ["null"])[0])
                     choice = {k: (q[k][0] if k == "folder" else json.loads(q[k][0]))
-                              for k in ("folder", "entries", "confs") if k in q}
+                              for k in ("folder", "entries", "confs", "slots") if k in q}
                     text = firmware.build_yaml(name, Args().zmk, q["reset"][0] == "1",
-                                               _parts_choice(parts), **_prep_choice(choice))
+                                               _parts_choice(parts), **_prep_choice(choice),
+                                               slots=_slots_choice(choice))
                 out["targets"] = [t["artifact"] for t in
                                   firmware.targets(name, text, Args().zmk)]
                 out["rewrites"] = firmware.ci_rewrites(name, text, Args().zmk)
@@ -1017,6 +1041,13 @@ def _prep_choice(rec) -> dict:
             "entries": [str(e) for e in entries] if isinstance(entries, list) else None,
             "confs": ({str(k): bool(v) for k, v in confs.items()}
                       if isinstance(confs, dict) else None)}
+
+
+def _slots_choice(rec):
+    """The vile slots settings from the page: a dict, False for off, or None
+    (absent) to keep what the variant's build.yaml has."""
+    s = rec.get("slots")
+    return s if isinstance(s, dict) or s is False else None
 
 
 def _need(exc) -> dict:

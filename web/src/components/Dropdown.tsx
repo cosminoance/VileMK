@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 /** `title` says why a `disabled` item is off. */
 export type DropItem = { label: ReactNode; onPick: () => void; danger?: boolean;
@@ -12,7 +12,20 @@ export function Dropdown({ label, items, className = "act", title, caret = true,
       caret?: boolean; end?: boolean }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const id = useId();
+
+  // Fixed to the window so a clipping parent (the sidebar) cannot cut it off,
+  // and kept inside the window on both sides.
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const b = box.current!.getBoundingClientRect();
+    const w = menu.current!.offsetWidth;
+    const want = end ? b.right - w : b.left;
+    setPos({ top: b.bottom + 4,
+             left: Math.max(8, Math.min(want, window.innerWidth - w - 8)) });
+  }, [open, end]);
 
   useEffect(() => {
     if (!open) return;
@@ -21,8 +34,15 @@ export function Dropdown({ label, items, className = "act", title, caret = true,
     };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", away);
+    const scroll = (e: Event) => {
+      if (!menu.current?.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener("keydown", esc);
+    window.addEventListener("scroll", scroll, true);
+    window.addEventListener("resize", scroll);
     return () => {
+      window.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("resize", scroll);
       document.removeEventListener("mousedown", away);
       document.removeEventListener("keydown", esc);
     };
@@ -36,7 +56,8 @@ export function Dropdown({ label, items, className = "act", title, caret = true,
         {label}{caret && <> <span className="caret">{"▾"}</span></>}
       </button>
       {open &&
-        <div className={"dropmenu" + (end ? " end" : "")} role="menu" id={id}>
+        <div className={"dropmenu"} role="menu" id={id} ref={menu}
+             style={pos ? pos : { visibility: "hidden" }}>
           {items.map((it, i) => (
             <button key={i} role="menuitem" className={it.danger ? "danger" : ""}
                     disabled={it.disabled} title={it.title}

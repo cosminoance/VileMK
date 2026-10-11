@@ -5,11 +5,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
-import { choicesChanged } from "../lib/keymaps";
-import { layerEdits, type State } from "../state/store";
+import { byId, choicesChanged } from "../lib/keymaps";
+import { fileDiff, fileDiffers } from "../lib/studio";
+import { layerEdits, useStore, type State } from "../state/store";
 import { ask } from "./Confirm";
 import { Help } from "./Help";
 import { Modal } from "./Modal";
+import { resetKeyboard } from "./Studio";
 
 const POLL_MS = 1000;
 const LOOK_MS = 10000;
@@ -36,7 +38,24 @@ export function flashBlock(s: State, km: any): string | null {
   return null;
 }
 
+/** A keyboard open in Studio mode, matched to the variant `name`, whose keymap
+ *  differs from that variant's file or holds unsaved changes; else null. */
+async function studioHolds(data: any, name: string) {
+  const st = await api("GET", "/api/studio/status").catch(() => null);
+  if (!st?.port || !st.info) return null;
+  const km = byId(data.keymaps, (data.studio_keyboards || {})[st.info.serial || st.info.name] || "");
+  if (!km || km.kind !== "variant" || km.name !== name) return null;
+  const [k, b, lk] = await Promise.all([api("GET", "/api/studio/keymap"),
+    api("GET", "/api/studio/behaviors"), api("GET", "/api/studio/lock")]);
+  const diff = fileDiff(km, k.layers, b.behaviors);
+  if (!fileDiffers(diff) && !lk.unsaved) return null;
+  return { device: st.info.name as string,
+           keys: Object.values(diff.keys).reduce((a, n) => a + n, 0), unsaved: !!lk.unsaved };
+}
+
 export function FlashSheet({ name, close }: { name: string; close: () => void }) {
+  const { s } = useStore();
+  const [held, setHeld] = useState<Awaited<ReturnType<typeof studioHolds>>>(null);
   const [files, setFiles] = useState<string[] | null>(null);
   const [fresh, setFresh] = useState(true);
   const [drive, setDrive] = useState<Drive | null>(null);
@@ -62,6 +81,12 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
     until.current = Date.now() + LOOK_MS;
     setLeft(LOOK_MS / 1000);
     setLooking(true);
+  };
+
+  useEffect(() => { studioHolds(s.data, name).then(setHeld).catch(() => {}); }, []);
+  const resetHeld = async () => {
+    try { if (await resetKeyboard(held!.device)) setHeld(await studioHolds(s.data, name)); }
+    catch (e: any) { setErr(e.message); }
   };
 
   useEffect(() => {
@@ -163,6 +188,15 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
       {!!files?.length && !fresh &&
         <div className="warn">This firmware was built before the variant was
           last saved. Build it again to flash what you saved.</div>}
+
+      {held &&
+        <div className="warn">{held.device || "The keyboard"} is open in Studio mode and
+          {" "}{held.keys ? `differs from ${name} on ${held.keys} keys` : `differs from ${name}`}
+          {held.unsaved && " (some of it unsaved)"}. Keys Studio changed stay on the keyboard
+          after a flash and win over the new firmware. Save them as a variant in Studio mode
+          and flash that, or reset the keyboard first.
+          <button className="ghost sm danger push" onClick={resetHeld}>Reset keyboard</button>
+        </div>}
 
       {!!files?.length && <>
         <ol className="steps">

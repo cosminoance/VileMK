@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import os
 import shlex
 import shutil
@@ -56,6 +57,9 @@ CONFIG_AT = "/zmk/config"
 PREPARED_AT = "/zmk/prepared"
 FIRMWARE = "firmware"
 OUTPUTS = (".uf2", ".bin")
+# The vile slots module, mounted with the prepared modules when a build has slots.
+VILE_MODULE = os.path.join(PROJECT_DIR, "firmware", "zmk-vilemk")
+SLOT_MAP = "slots.json"
 MAX_LINES = 50000
 
 
@@ -143,7 +147,7 @@ def artifact_name(board: str, shield: str, name: str = "") -> str:
 
 
 def build_yaml(name: str, zmk_dir: str, reset: bool, parts=None, folder=None,
-               entries=None, confs=None) -> str:
+               entries=None, confs=None, slots=None) -> str:
     """The build.yaml the variant gets with these choices, from its saved keymap.
 
     The page's "include reset", parts, folder, entries and conf boxes apply to
@@ -164,7 +168,7 @@ def build_yaml(name: str, zmk_dir: str, reset: bool, parts=None, folder=None,
             m.group(1), os.path.basename(path), zmk_dir, keymap_text=text,
             reset=reset, parts=parts,
             build_path=os.path.join(custom.variant_dir(name), "build.yaml"),
-            folder=folder, entries=entries, confs=confs)
+            folder=folder, entries=entries, confs=confs, slots=slots)
     except (custom.EmitError, ValueError) as exc:
         raise BuildError(str(exc)) from None
     return out
@@ -459,6 +463,20 @@ def keymap_includes(name: str, prep=(), zmk_dir: str = workspace.ZMK_DIR) -> dic
     return out
 
 
+def slot_notes(name: str, slots) -> list:
+    """What a vile slots build puts in slots and what stays compiled."""
+    if not slots:
+        return []
+    try:
+        _text, smap, notes = custom.slot_keymap(
+            keymap.read_text(custom.variant_path(name)), slots, key_count(name))
+    except (custom.EmitError, OSError):
+        return []
+    return [f"vile slots: layer {smap['layer']}, {len(smap['four'])} four-way and "
+            f"{len(smap['two'])} two-way viledances, {len(smap['combos'])} combos in slots"
+            ] + [f"vile slots: {n}" for n in notes]
+
+
 def includes_notes(name: str, prep=()) -> list:
     """One line per module `stage()` copies keymap includes from."""
     by = {}
@@ -468,7 +486,22 @@ def includes_notes(name: str, prep=()) -> list:
             for m, fs in by.items()]
 
 
-def stage(name: str, prep=(), zmk_dir: str = workspace.ZMK_DIR) -> str:
+def key_count(name: str) -> int:
+    """Key positions in the variant's keymap: its first real layer."""
+    km = keymap.parse_keymap(custom.variant_path(name))
+    return next((len(lay["bindings"]) for lay in km["layers"] if not lay.get("reserved")), 0)
+
+
+def slot_map(name: str):
+    """The slot map of the firmware last built for the variant, or None."""
+    try:
+        with open(os.path.join(firmware_dir(name), SLOT_MAP), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def stage(name: str, prep=(), zmk_dir: str = workspace.ZMK_DIR, slots=None) -> str:
     """Copy `config/` plus the variant's keymap into `.zmk/stage/<name>/`.
 
     The copy is what the container sees at /zmk/config, read-only. The
@@ -479,6 +512,10 @@ def stage(name: str, prep=(), zmk_dir: str = workspace.ZMK_DIR) -> str:
     Each module in `prep` (`prepared()`) is copied to `modules/<module>/`,
     fixed up there, and dropped from the staged west.yml, so west does not
     also hand Zephyr the original. `.zmk/modules/` is not touched.
+
+    With `slots` (`custom.slots_of()`) the staged keymap is rewritten by
+    `custom.slot_keymap()`, the vile slots module is copied to `modules/` and
+    the slot map goes to `out/` to be published with the firmware.
     """
     if not os.path.isfile(WEST_YML):
         raise BuildError(f"there is no {WEST_YML}; run `make zmk` first")
@@ -498,6 +535,17 @@ def stage(name: str, prep=(), zmk_dir: str = workspace.ZMK_DIR) -> str:
         shutil.copyfile(os.path.join(zmk_dir, "modules", m, "config", fn),
                         os.path.join(root, "config", fn))
     os.makedirs(os.path.join(root, "out"), exist_ok=True)
+    if slots:
+        try:
+            text, smap, _notes = custom.slot_keymap(
+                keymap.read_text(staged_keymap), slots, key_count(name))
+        except custom.EmitError as exc:
+            raise BuildError(f"vile slots: {exc}") from None
+        with open(staged_keymap, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        with open(os.path.join(root, "out", SLOT_MAP), "w", encoding="utf-8") as fh:
+            json.dump(smap, fh, indent=1)
+        shutil.copytree(VILE_MODULE, os.path.join(root, "modules", "zmk-vilemk"))
     for p in prep:
         src = os.path.join(zmk_dir, "modules", p["module"])
         dst = os.path.join(root, "modules", p["module"])
@@ -611,7 +659,7 @@ def _publish(name: str, root: str, source_ns: int) -> list:
     dest = firmware_dir(name)
     os.makedirs(dest, exist_ok=True)
     for f in os.listdir(dest):
-        if f.endswith(OUTPUTS):
+        if f.endswith(OUTPUTS) or f == SLOT_MAP:
             os.remove(os.path.join(dest, f))
     out = os.path.join(root, "out")
     for f in sorted(os.listdir(out)):
@@ -680,19 +728,22 @@ class Job:
         if yaml_text is not None:
             with open(build, "w", encoding="utf-8") as fh:
                 fh.write(yaml_text)
-        prep = prepared(tgts, keymap.read_text(build), rewrites=rewrites)
+        yaml = keymap.read_text(build)
+        prep = prepared(tgts, yaml, rewrites=rewrites)
+        slots = custom.slots_of(yaml)
         source_ns = _source_ns(name)
-        root = stage(name, prep)
+        root = stage(name, prep, slots=slots)
+        extra = [p["module"] for p in prep] + (["zmk-vilemk"] if slots else [])
         with self.lock:
             self.state, self.variant = "running", name
             self.lines, self.dropped, self.files = [], 0, []
             self.started, self.finished = time.time(), 0.0
             self.cancelled = False
-        argv = command(root, script(tgts, _owner(status), [p["module"] for p in prep]),
-                       bool(prep))
+        argv = command(root, script(tgts, _owner(status), extra), bool(extra))
         self.thread = threading.Thread(target=self._run,
                                        args=(name, root, tgts, argv, echo, source_ns,
                                              [describe(p) for p in prep]
+                                             + slot_notes(name, slots)
                                              + includes_notes(name, prep)
                                              + drivers_notes(prep)),
                                        daemon=True)
@@ -770,13 +821,14 @@ def main() -> int:
         if args.dry_run:
             name = custom.variant_slug(args.variant)
             tgts = targets(name)
-            prep = prepared(tgts, keymap.read_text(
-                os.path.join(custom.variant_dir(name), "build.yaml")))
+            yaml = keymap.read_text(os.path.join(custom.variant_dir(name), "build.yaml"))
+            prep = prepared(tgts, yaml)
+            slots = custom.slots_of(yaml)
+            extra = [p["module"] for p in prep] + (["zmk-vilemk"] if slots else [])
             root = os.path.abspath(os.path.join(STAGE_DIR, name))
-            argv = command(root, script(tgts, _owner(docker_status()),
-                                        [p["module"] for p in prep]), bool(prep))
-            for note in ([describe(p) for p in prep] + includes_notes(name, prep)
-                         + drivers_notes(prep)):
+            argv = command(root, script(tgts, _owner(docker_status()), extra), bool(extra))
+            for note in ([describe(p) for p in prep] + slot_notes(name, slots)
+                         + includes_notes(name, prep) + drivers_notes(prep)):
                 print(f"# {note}")
             print(" ".join(shlex.quote(a) for a in argv[:-1]) + " <<script>>")
             print(argv[-1], end="")

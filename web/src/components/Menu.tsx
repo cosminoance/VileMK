@@ -28,15 +28,18 @@ function targetText(editing: number | null, field: string | null,
 export function Menu({ layer }: { layer: any }) {
   const { s, d } = useStore();
   const sp = useContext(StudioPickCtx);
-  const t = sp ? { cur: sp.cur, exclude: [] as Mode[] } : menuTarget(s, layer);
+  // A panel open in Studio with no key open fills the panel, as in Firmware mode.
+  const panel = !!sp && !!s.emode && sp.editing === null;
+  const t = sp && !panel ? { cur: sp.cur, exclude: [] as Mode[] } : menuTarget(s, layer);
   const tabs = PTABS.filter(([v]) => !t.exclude.includes(v as Mode));
-  // Studio cannot add combos or conditional layers, so their tabs are dimmed there.
+  // Studio cannot add combos or conditional layers, so their tabs are dimmed there,
+  // except combos on a keyboard with vile slots.
   const board = PTABS.slice(PTABS.findIndex(([v]) => v === FIRST_BOARD_TAB)).map(([v]) => v);
-  const off = (v: string) => !!sp && board.includes(v);
+  const off = (v: string) => !!sp && board.includes(v) && !(v === "combo" && !sp.slotWhy("combo"));
   const ptab = t.exclude.includes(s.ptab as Mode) || off(s.ptab) ? "keyboard" : s.ptab;
-  const field = sp ? KEY_FIELD : activeFieldOf(s);
+  const field = sp && !panel ? KEY_FIELD : activeFieldOf(s);
   const label = menuFields(s).find((f) => f.key === field)?.label;
-  const editing = sp ? sp.editing : s.editing;
+  const editing = sp && !panel ? sp.editing : s.editing;
 
   return (
     <div className="menu">
@@ -54,7 +57,7 @@ export function Menu({ layer }: { layer: any }) {
                 onClick={() => d({ t: "picker", on: !s.picker })}>
           {s.picker ? "Hide" : "Show"}
         </button>
-        <span className="ptarget">{!sp || editing !== null ? targetText(editing, field, label)
+        <span className="ptarget">{!sp || panel || editing !== null ? targetText(editing, field, label)
                                    : "→ nothing to fill: click a key on the board"}</span>
       </div>
       <div className={"picker" + (s.picker ? "" : " hidden")}>

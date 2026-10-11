@@ -19,7 +19,7 @@ const bad = (e: unknown) => ({ text: (e as Error).message, bad: true });
 // against and nowhere else - that is the "off unless you say so" rule, minus
 // the pointless step of switching on the one you are obviously making it for.
 // An existing record's scopes are left exactly as they are.
-export async function saveItem(s: State, d: D, mode: Mode, draft: any) {
+export async function saveItem(s: State, d: D, mode: Mode, draft: any): Promise<boolean> {
   const kind = KIND_OF[mode];
   let body = { ...draft, kind };
   if (BOARD_TABS.includes(mode) && !recordOf(s.store, mode, draft.name)) {
@@ -29,7 +29,8 @@ export async function saveItem(s: State, d: D, mode: Mode, draft: any) {
   try {
     const r = await api("POST", "/api/" + kind, body);
     d({ t: "leavePanel", mode, store: r.custom, msg: { text: "saved " + r.saved } });
-  } catch (e) { d({ t: "msg", msg: bad(e) }); }
+    return true;
+  } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
 }
 
 export async function previewItem(d: D, mode: Mode, draft: any) {
@@ -88,10 +89,13 @@ export async function previewBinding(d: D, kind: string, rec: any): Promise<stri
 // `parts` is `{part_id: bool}` for the add-on shields; the build.yaml keeps the
 // ticked ones (`build_yaml_for(parts=)`). `choices` carries both, plus a
 // prepared module's folder, entries and confs (`choicesBody()`).
+// `edits` replaces the Firmware pending edits (Studio's write-back); then the
+// Firmware selection and its pending state are left alone. Resolves to the
+// written keymap's id (null when it is not listed), or false.
 export async function saveVariant(
   s: State, d: D, km: any, over: string | null, typed: string,
-  choices: Record<string, unknown>,
-): Promise<boolean> {
+  choices: Record<string, unknown>, edits?: Record<string, unknown>,
+): Promise<string | null | false> {
   const name = over || typed.trim();
   if (!name) {
     d({ t: "msg", msg: { text: "give the variant a name", bad: true } });
@@ -108,7 +112,9 @@ export async function saveVariant(
                         { name, base: km.id, assignments: s.assign,
                           scope: scopeOf(km), ...choices,
                           new_layers: s.newLayers[km.id] || [],
-                          drop_layers: s.dropLayers[km.id] || [] });
+                          drop_layers: s.dropLayers[km.id] || [],
+                          layer_order: s.layerOrder[km.id] || [],
+                          rename_layers: s.layerNames[km.id] || {}, ...edits });
     // Pull the fresh keymap list so the new file shows up in "Saved variations"
     // without a page reload, and jump straight to it - matching by filename
     // since `r.wrote` is project-relative while a keymap's `id` carries the
@@ -117,14 +123,21 @@ export async function saveVariant(
     const fn = r.wrote.split("/").pop();
     const created = fresh.keymaps.find(
       (k: any) => k.kind === "variant" && k.path.split("/").pop() === fn);
+    const msg = { text: `wrote ${r.folder || r.wrote}`
+                    + (r.build ? " (keymap + build.yaml)" : "")
+                    + (r.warnings && r.warnings.length ? " - " + r.warnings.join("; ") : "") };
+    if (edits) {
+      d({ t: "data", data: fresh });
+      d({ t: "store", store: fresh.custom || r.custom || s.store });
+      d({ t: "msg", msg });
+      await showNotices(r);
+      return created ? created.id : null;
+    }
     // A variant is a folder: the keymap, and the build.yaml that builds it.
     d({ t: "savedVariant", data: fresh, store: fresh.custom || r.custom || s.store,
-        id: created ? created.id : null, kmId: km.id,
-        msg: { text: `wrote ${r.folder || r.wrote}`
-                 + (r.build ? " (keymap + build.yaml)" : "")
-                 + (r.warnings && r.warnings.length ? " - " + r.warnings.join("; ") : "") } });
+        id: created ? created.id : null, kmId: km.id, msg });
     await showNotices(r);
-    return true;
+    return created ? created.id : null;
   } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
 }
 

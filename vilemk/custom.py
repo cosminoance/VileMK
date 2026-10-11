@@ -882,8 +882,96 @@ _NUM_DEFINE_RE = re.compile(r"(?m)^([ \t]*#[ \t]*define[ \t]+(\w+)[ \t]+)(\d+)([
 
 
 def drop_layers(text: str, drops) -> tuple[str, list]:
-    """Remove the layers at `drops` (indices) and renumber what names the ones
-    after them. -> (text, notes).
+    """Remove the layers at `drops` (indices); see `reorder_layers()`."""
+    drops = {int(i) for i in drops}
+    if not drops:
+        return text, []
+    return reorder_layers(text, [i for i in range(len(_layer_nodes(text)))
+                                 if i not in drops])
+
+
+def rename_layers(text: str, names) -> str:
+    """Give the layers in `names` ({index: name}) the node name `slug(name)` and
+    `display-name = "name"`. A node label in front of the name is kept."""
+    names = {int(i): str(n).strip() for i, n in (names or {}).items() if str(n).strip()}
+    if not names:
+        return text
+    nodes = _layer_nodes(text)
+    taken = {nm for nm, *_ in nodes}
+    for i in sorted(names, reverse=True):
+        if not 0 <= i < len(nodes):
+            raise EmitError(f"layer {i} does not exist in the base keymap")
+        old, start, end, _, _ = nodes[i]
+        name = slug(names[i])
+        if not NAME_RE.match(name or ""):
+            raise EmitError(f"layer name {names[i]!r} is not a valid identifier")
+        if name != old and name in taken:
+            raise EmitError(f"a layer named {name!r} already exists")
+        taken = (taken - {old}) | {name}
+        node = text[start:end]
+        brace = node.index("{")
+        head = re.sub(r"\b" + re.escape(old) + r"(\s*)$", name + r"\1", node[:brace])
+        body = node[brace:]
+        quoted = names[i].replace("\\", "\\\\").replace('"', '\\"')
+        dn = re.compile(r'(?<![\w-])display-name\s*=\s*"(?:[^"\\]|\\.)*"')
+        if dn.search(body):
+            body = dn.sub(lambda m: f'display-name = "{quoted}"', body, count=1)
+        else:
+            ind = re.search(r"\n([ \t]*)\S", body)
+            pad = ind.group(1) if ind else "    "
+            body = "{\n" + f'{pad}display-name = "{quoted}";' + body[1:]
+        text = text[:start] + head + body + text[end:]
+    return text
+
+
+_RESERVED_RE = re.compile(r'\n[ \t]*status\s*=\s*"reserved"\s*;[ \t]*(?=\n)')
+_EMPTY_BINDINGS = "bindings = < >;"
+
+
+def open_reserved(text: str, use, keys: int, rows=None) -> str:
+    """Give every `status = "reserved"` layer a `bindings` list, so layer indices
+    count them as ZMK's layer ids do. Those in `use` become ordinary layers of
+    `keys` `&trans`; the rest get an empty list that `close_reserved()` removes."""
+    use = {int(i) for i in use or ()}
+    src = strip_comments(text)
+    m = _KEYMAP_NODE_RE.search(src)
+    if not m:
+        raise EmitError("no `keymap { }` node in the base keymap")
+    start = src.index("{", m.start())
+    idx, spare = 0, []
+    for _, _, b_open, b_close, _ in _children(src, start, _match_brace(src, start)):
+        body = src[b_open:b_close]
+        has = re.search(r"(?<![\w-])bindings\s*=\s*<", body)
+        if not has and not re.search(r'(?<![\w-])status\s*=\s*"reserved"', body):
+            continue
+        if not has:
+            spare.append((idx, b_open, b_close))
+        idx += 1
+    unknown = use - {i for i, _, _ in spare}
+    if unknown:
+        raise EmitError(f"layer {min(unknown)} is not a reserved layer of the base keymap")
+    for i, b_open, b_close in reversed(spare):
+        body = text[b_open:b_close]
+        ind = re.search(r"\n([ \t]*)\S", body)
+        pad = ind.group(1) if ind else " " * 12
+        if i in use:
+            body = _RESERVED_RE.sub("", body, count=1)
+            body = re.sub(r'(?<![\w-])status\s*=\s*"reserved"\s*;', "", body, count=1)
+            prop = f"bindings = <{_format_bindings(['&trans'] * keys, rows)}>;"
+        else:
+            prop = _EMPTY_BINDINGS
+        text = text[:b_open] + "{\n" + pad + prop + body[1:] + text[b_close:]
+    return text
+
+
+def close_reserved(text: str) -> str:
+    """Take out the empty lists `open_reserved()` gave unused reserved layers."""
+    return re.sub(r"\n[ \t]*" + re.escape(_EMPTY_BINDINGS), "", text)
+
+
+def reorder_layers(text: str, order) -> tuple[str, list]:
+    """Keep the layers whose indices `order` lists, in that order, and renumber
+    what names them. -> (text, notes).
 
     Keys that switch to a removed layer become `&none`, and a built-in `&lt`
     keeps its tap as `&kp`. A combo left with no
@@ -892,19 +980,37 @@ def drop_layers(text: str, drops) -> tuple[str, list]:
     not the key. `text` must have its generated block stripped: records are
     global and are not renumbered here (see `layer_numbered_records()`).
     """
-    drops = sorted({int(i) for i in drops})
-    if not drops:
-        return text, []
     nodes = _layer_nodes(text)
     count = len(nodes)
-    if drops[0] < 0 or drops[-1] >= count:
-        raise EmitError(f"layer {drops[-1] if drops[-1] >= count else drops[0]} "
-                        "does not exist in the base keymap")
-    if len(drops) >= count:
+    order = [int(i) for i in order]
+    if order == list(range(count)):
+        return text, []
+    if len(set(order)) != len(order) or any(not 0 <= i < count for i in order):
+        raise EmitError(f"layer order {order} does not fit the {count} layers "
+                        "of the base keymap")
+    if not order:
         raise EmitError("a keymap needs at least one layer")
-    new = {i: i - sum(d < i for d in drops) for i in range(count) if i not in drops}
+    drops = [i for i in range(count) if i not in order]
+    new = {old: pos for pos, old in enumerate(order)}
+    notes = []
+
+    full = order + drops
+    pieces = [text[s:e] for _, s, e, _, _ in nodes]
+    for k in reversed(range(count)):
+        _, s, e, _, _ = nodes[k]
+        text = text[:s] + pieces[full[k]] + text[e:]
+    if drops:
+        moved = _layer_nodes(text)
+        for k in reversed(range(len(order), count)):
+            text = _cut(text, moved[k][1], moved[k][2])
+        notes.append("deleted layer(s) " + ", ".join(
+            f"{i} ({nodes[i][0]})" for i in drops))
+    if order != sorted(order):
+        notes.append("moved layer(s) " + ", ".join(
+            f"{nodes[old][0]} to {pos}" for pos, (old, was) in enumerate(
+                zip(order, sorted(order))) if old != was))
     defines = keymap._numeric_defines(text)
-    used, notes, gone_keys = set(), [], 0
+    used, gone_keys = set(), 0
 
     def num(tok):
         if tok.isdigit():
@@ -912,12 +1018,6 @@ def drop_layers(text: str, drops) -> tuple[str, list]:
         if tok in defines:
             used.add(tok)
         return defines.get(tok)
-
-    for i in reversed(drops):
-        _, start, end, _, _ = nodes[i]
-        text = _cut(text, start, end)
-    notes.append("deleted layer(s) " + ", ".join(
-        f"{i} ({nodes[i][0]})" for i in drops))
 
     for compat in ("zmk,combos", "zmk,conditional-layers"):
         src = strip_comments(text)
@@ -979,7 +1079,7 @@ def drop_layers(text: str, drops) -> tuple[str, list]:
 
 def layer_numbered_records(viledances, combos, layers, macros, first: int) -> list:
     """Names of the records being written that name layer `first` or later by
-    number. They are global, so a layer deletion in one variant cannot renumber
+    number. They are global, so deleting or moving a layer in one variant cannot renumber
     them."""
     def refs(texts):
         return [int(m.group(1)) for t in texts
@@ -1201,7 +1301,7 @@ def reachable_records(text, viledances, combos, layers, macros, scope=""):
 
 def build_variant(base_text, expanded_layers, assignments, viledances, combos,
                   layers=(), macros=(), rows=None, new_layers=(), scope="",
-                  drop=()):
+                  drop=(), order=None, rename=None, unreserve=None, keys=0):
     """Base keymap + key assignments + only the custom code those keys use.
 
     `assignments` is {layer_index: {key_position: binding}}. `expanded_layers` is
@@ -1214,13 +1314,21 @@ def build_variant(base_text, expanded_layers, assignments, viledances, combos,
     scope key of the variant being written (`scope_key("variant", name)`); the
     combos and conditional layers switched on for it are the ones written, and
     nothing is written when it is blank. `drop` is the layer indices to delete,
-    counted like `assignments`, after the new layers are in (`drop_layers()`).
+    counted like `assignments`, after the new layers are in. `order` is every
+    layer index in its new order (None keeps it) and `rename` is {index: name},
+    counted the same way (`reorder_layers()`, `rename_layers()`). With
+    `unreserve` (a list, maybe empty) every index counts reserved layers too, as
+    ZMK's layer ids do, and those listed become layers of `keys` `&trans`
+    (`open_reserved()`).
 
     Which VileDances, macros and layer-taps come with it is not a filter over the
     keys alone: it is the set *reachable* from them, since one record may
     reference another (see `_refs()`).
     """
+    if unreserve is not None:
+        base_text = open_reserved(base_text, unreserve, keys, rows)
     text = _insert_new_layers(base_text, new_layers, expanded_layers, rows)
+    text = rename_layers(text, rename)
 
     for idx in sorted(assignments, reverse=True):
         spans = _layer_spans(text)
@@ -1248,15 +1356,24 @@ def build_variant(base_text, expanded_layers, assignments, viledances, combos,
     # under a binding that still points at it, and the build fails on an
     # undefined node label.
     text = strip_block(text)
-    text, dropped = drop_layers(text, drop)
+    drop = {int(i) for i in drop}
+    count = len(_layer_nodes(text))
+    keep = [int(i) for i in (order if order is not None else range(count))
+            if int(i) not in drop]
+    if order is not None and sorted(list(map(int, order))) != list(range(count)):
+        raise EmitError(f"layer order {list(order)} does not fit the {count} layers")
+    text, dropped = reorder_layers(text, keep)
+    if unreserve is not None:
+        text = close_reserved(text)
     wanted, live_combos, live_layers, live_macros = reachable_records(
         text, viledances, combos, layers, macros, scope)
 
     gen, errors = block(wanted, live_combos, live_layers, live_macros)
     errors = dropped + errors
-    if drop:
+    changed = [i for i in range(count) if (keep.index(i) if i in keep else None) != i]
+    if changed:
         stale = layer_numbered_records(wanted, live_combos, live_layers, live_macros,
-                                       min(int(i) for i in drop))
+                                       min(changed))
         if stale:
             errors.append("check the layer numbers in " + ", ".join(stale)
                           + ": saved records are shared and were not renumbered")
@@ -1295,6 +1412,204 @@ def with_manifest(text, viledances, combos, layers, macros, scope=""):
                              macros, scope)
     at = text.find(BEGIN_MARK) + len(BEGIN_MARK)
     return text[:at] + "\n" + manifest(*recs) + text[at:]
+
+
+# ------------------------------------------------------------- vile slots
+# A build with vile slots gets one more layer that nothing activates. Each of
+# its positions is a slot holding one binding, and `&vslot N` (the module in
+# firmware/zmk-vilemk) runs slot N. ZMK Studio writes slots like any key, so
+# what a slot-backed viledance or combo sends changes with no flash.
+#
+# The variant file never shows any of it: `slot_keymap()` rewrites the staged
+# copy only. Four-way viledances use containers (a tap-dance of two shared
+# hold-taps, four slots each), two-way ones (hold and tap only) two slots bound
+# as `&vht1 HOLD TAP`, combos one slot as their output. Within a container the
+# slots are hold, tap, tap + hold, double tap.
+
+SLOTS_LINE = "# vilemk-slots:"
+SLOTS_RE = re.compile(r"(?m)^#[ \t]*vilemk-slots:[ \t]*(.*?)[ \t]*$")
+SLOT_LAYER = "vile_slots"
+SLOT_LAYER_NAME = "VileMK do not edit"
+SLOT_KEYS = ("four", "two", "combos", "term", "flavor", "flavor2")
+
+
+def slot_defaults(keys: int) -> dict:
+    return {"four": keys // 8, "two": keys // 8, "combos": keys // 4,
+            "term": 200, "flavor": "tap-preferred", "flavor2": SECOND_ROW_FLAVOR}
+
+
+def check_slots(s, keys: int = 0) -> dict:
+    """The slot settings cleaned up, or EmitError. `keys` > 0 also checks they fit."""
+    if not isinstance(s, dict):
+        raise EmitError("slot settings must be an object")
+    out = {}
+    try:
+        for k in ("four", "two", "combos", "term"):
+            out[k] = int(s.get(k, 0))
+    except (TypeError, ValueError):
+        raise EmitError("slot counts and the tapping term must be numbers") from None
+    if min(out["four"], out["two"], out["combos"]) < 0 or out["term"] <= 0:
+        raise EmitError("slot counts cannot be negative and the tapping term must be over 0")
+    for k in ("flavor", "flavor2"):
+        out[k] = str(s.get(k) or "")
+        if out[k] not in FLAVORS:
+            raise EmitError(f"{k} must be one of {', '.join(FLAVORS)}")
+    used = 4 * out["four"] + 2 * out["two"] + out["combos"]
+    if keys and used > keys:
+        raise EmitError(f"the slots take {used} positions and the keyboard has {keys}")
+    return out
+
+
+def slots_of(text: str):
+    """The slot settings a build.yaml records, or None when slots are off."""
+    m = SLOTS_RE.search(text or "")
+    if not m:
+        return None
+    pairs = dict(p.split("=", 1) for p in m.group(1).split() if "=" in p)
+    try:
+        return check_slots(pairs)
+    except EmitError:
+        return None
+
+
+def slots_line(s: dict) -> str:
+    return SLOTS_LINE + " " + " ".join(f"{k}={s[k]}" for k in SLOT_KEYS) + "\n"
+
+
+def vd_shape(rec: dict) -> str:
+    """`four` with a second press, `two` with hold and tap only, else "" (a
+    plain key, nothing to put in slots)."""
+    if rec.get("double_tap") or rec.get("tap_hold"):
+        return "four"
+    return "two" if rec.get("hold") and rec.get("tap") else ""
+
+
+def _layer_id_count(text: str) -> int:
+    """Children of the keymap node: ZMK's layer ids with Studio on, reserved ones too."""
+    src = strip_comments(text)
+    m = _KEYMAP_NODE_RE.search(src)
+    if not m:
+        raise EmitError("no `keymap { }` node in the keymap")
+    start = src.index("{", m.start())
+    return len(_children(src, start, _match_brace(src, start)))
+
+
+def slot_keymap(text: str, s: dict, keys: int):
+    """A variant keymap rewritten for a vile slots build -> (text, slot map, notes).
+
+    Reads the records from the keymap's own manifest, so it needs nothing from
+    custom/. Records past a type's count stay compiled as they were.
+    """
+    s = check_slots(s, keys)
+    recs = read_manifest(text)
+    body = strip_block(text)
+    four, two, kept, notes = [], [], [], []
+    for r in recs["viledance"]:
+        shape = vd_shape(r)
+        room = s["four"] if shape == "four" else s["two"] if shape == "two" else 0
+        pool = four if shape == "four" else two
+        if shape and len(pool) < room:
+            pool.append(r)
+        else:
+            if shape:
+                notes.append(f"viledance {r['name']} is compiled: all {room} "
+                             f"{shape}-way slots are taken")
+            kept.append(r)
+    combos, combo_recs = [], recs["combo"][:s["combos"]]
+    for r in recs["combo"][len(combo_recs):]:
+        notes.append(f"combo {r['name']} is compiled: all {s['combos']} combo slots are taken")
+
+    subs = []
+    for k, r in enumerate(four):
+        subs.append((re.compile(r"&vd_" + re.escape(slug(r["name"])) + r"\b"), f"&vd_s{k}"))
+    base2 = 4 * s["four"]
+    for j, r in enumerate(two):
+        a = base2 + 2 * j
+        subs.append((re.compile(r"&ht_" + re.escape(slug(r["name"])) + r"\b(?:\s+\S+){2}"),
+                     f"&vht1 {a} {a + 1}"))
+
+    def sub(t):
+        if not isinstance(t, str):
+            return t
+        for rx, new in subs:
+            t = rx.sub(new, t)
+        return t
+
+    def sub_rec(r, kind):
+        out = dict(r)
+        for f in _SLOT_FIELDS.get(kind, ()):
+            if f in out:
+                out[f] = sub(out[f])
+        if kind == "macro":
+            out["steps"] = [{**st, "binding": sub(st.get("binding", ""))}
+                            if isinstance(st, dict) else st
+                            for st in (out.get("steps") or [])]
+        return out
+
+    stock = ["&none"] * keys
+    row = lambda r, f: sub(normalise(r.get(f, ""))) or "&none"  # noqa: E731
+    vmap = []
+    for k, r in enumerate(four):
+        stock[4 * k:4 * k + 4] = [row(r, "hold"), row(r, "tap"),
+                                  row(r, "tap_hold"), row(r, "double_tap")]
+        vmap.append({"name": r["name"], "container": k,
+                     "slots": list(range(4 * k, 4 * k + 4))})
+    tmap = []
+    for j, r in enumerate(two):
+        a = base2 + 2 * j
+        stock[a:a + 2] = [row(r, "hold"), row(r, "tap")]
+        tmap.append({"name": r["name"], "slots": [a, a + 1]})
+    base1 = base2 + 2 * s["two"]
+    cmap = []
+    for i, r in enumerate(combo_recs):
+        stock[base1 + i] = row(r, "binding")
+        cmap.append({"name": r["name"], "slot": base1 + i})
+        combos.append({**sub_rec(r, "combo"), "binding": f"&vslot {base1 + i}"})
+    combos += [sub_rec(r, "combo") for r in recs["combo"][len(combo_recs):]]
+
+    body = _outside_comments(body, sub)
+    layer = _layer_id_count(body)
+    gen, errors = block([sub_rec(r, "viledance") for r in kept], combos,
+                        [sub_rec(r, "layer") for r in recs["layer"]],
+                        [sub_rec(r, "macro") for r in recs["macro"]])
+    notes += errors
+
+    t, f1, f2 = s["term"], s["flavor"], s["flavor2"]
+
+    def ht(label, flavor):
+        return (f"        {label}: {label} {{\n"
+                f"            compatible = \"zmk,behavior-hold-tap\";\n"
+                f"            display-name = \"{label}\";\n"
+                f"            #binding-cells = <2>;\n"
+                f"            tapping-term-ms = <{t}>;\n"
+                f"            flavor = \"{flavor}\";\n"
+                f"            bindings = <&vslot>, <&vslot>;\n"
+                f"        }};\n")
+    nodes = (f"        vslot: vslot {{\n"
+             f"            compatible = \"zmk,behavior-vile-slot\";\n"
+             f"            display-name = \"vslot\";\n"
+             f"            #binding-cells = <1>;\n"
+             f"            layer = <{layer}>;\n"
+             f"        }};\n" + ht("vht1", f1) + ht("vht2", f2))
+    for k in range(s["four"]):
+        b = 4 * k
+        nodes += (f"        vd_s{k}: vd_s{k} {{\n"
+                  f"            compatible = \"zmk,behavior-tap-dance\";\n"
+                  f"            display-name = \"vd_s{k}\";\n"
+                  f"            #binding-cells = <0>;\n"
+                  f"            tapping-term-ms = <{t}>;\n"
+                  f"            bindings = <&vht1 {b} {b + 1}>, <&vht2 {b + 2} {b + 3}>;\n"
+                  f"        }};\n")
+    slots = ("// vile slots, written for this build only\n/ {\n    behaviors {\n" + nodes
+             + "    };\n    keymap {\n"
+             + f"        {SLOT_LAYER} {{\n"
+             + f"            display-name = \"{SLOT_LAYER_NAME}\";\n"
+             + f"            bindings = <{_format_bindings(stock)}>;\n"
+             + "        };\n    };\n};\n")
+    out = body.rstrip() + "\n\n" + (gen + "\n" if gen else "") + slots
+    smap = {"layer": layer, "name": SLOT_LAYER_NAME, "keys": keys, "settings": s,
+            "four": vmap, "two": tmap, "combos": cmap, "stock": stock}
+    return out, smap, notes
 
 
 def variant_slug(name: str) -> str:
@@ -1718,7 +2033,8 @@ def _without_keymap_file(cmake_args: str) -> str:
 
 def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
                    keymap_text: str = "", reset: bool = False, parts=None,
-                   build_path: str = "", folder=None, entries=None, confs=None):
+                   build_path: str = "", folder=None, entries=None, confs=None,
+                   slots=None):
     """-> (build.yaml text, warnings) for one keyboard and one keymap.
 
     Reads the project, so the caller must already be `chdir`-ed into it -
@@ -1742,9 +2058,18 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
     shield folder and `confs` the ticked `config/*.conf` files, as a list of
     ids or as `{id: bool}` over `confs_offer()`'s defaults. None keeps what
     the variant's current `build_path` has.
+
+    `slots` is the vile slots settings (`check_slots()`), False for none, or
+    None to keep what `build_path` records. Slots need Studio, so a keymap
+    without `&studio_unlock` is refused.
     """
     warnings, source, top = [], "", ""
     feature_flags, studio = _feature_flags(keymap_text)
+    chosen_slots = slots if slots is not None else slots_of(_read(build_path))
+    if chosen_slots:
+        if not studio:
+            raise EmitError("vile slots need ZMK Studio: bind &studio_unlock on a key first")
+        top += slots_line(check_slots(chosen_slots))
     if feature_flags:
         warnings.append(
             "the keymap binds feature-gated behaviors, so the build entries "
@@ -1842,7 +2167,7 @@ def build_yaml_for(keyboard: str, keymap_name: str, zmk_dir: str = ".zmk",
             body.append(f"    cmake-args: {args}")
         if reset:
             body += _reset_body([keyboard])
-        return _build_yaml_text(keyboard, keymap_name, head, body), warnings
+        return _build_yaml_text(keyboard, keymap_name, head, body, top), warnings
 
     vendor_parts = _vendor_parts(keyboard, zmk_dir)
     seen, body = set(), []
@@ -1962,7 +2287,7 @@ def delete_variant(name: str) -> bool:
 
 def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk",
                   reset: bool = False, parts=None, folder=None, entries=None,
-                  confs=None):
+                  confs=None, slots=None):
     """Write `variants/<name>/` - the keymap, and the build list that builds it.
 
     -> (keymap path, build.yaml path or "", warnings). The build list is skipped
@@ -1970,8 +2295,8 @@ def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk
     written, since it is the thing the user asked for.
 
     `reset` adds the `settings_reset` entries to that build list, `parts`
-    picks its add-on shields, and `folder`, `entries` and `confs` are a
-    prepared module's choices - see `build_yaml_for()`.
+    picks its add-on shields, `folder`, `entries` and `confs` are a prepared
+    module's choices and `slots` the vile slots - see `build_yaml_for()`.
     """
     p = variant_path(name)
     os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -1994,7 +2319,7 @@ def write_variant(name: str, text: str, keyboard: str = "", zmk_dir: str = ".zmk
         yaml_text, yaml_warnings = build_yaml_for(
             keyboard, os.path.basename(p), zmk_dir, keymap_text=text, reset=reset,
             parts=parts, build_path=build_path, folder=folder, entries=entries,
-            confs=confs)
+            confs=confs, slots=slots)
         with open(build_path, "w", encoding="utf-8") as fh:
             fh.write(yaml_text)
         warnings += yaml_warnings

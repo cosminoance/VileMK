@@ -179,6 +179,7 @@ ADD_LAYER_ERRORS = {1: "generic error", 2: "no reserved layer left: add one in t
 REMOVE_LAYER_ERRORS = {1: "generic error", 2: "invalid layer index"}
 RESTORE_LAYER_ERRORS = {1: "generic error", 2: "invalid layer id", 3: "invalid index"}
 LAYER_PROPS_ERRORS = {1: "generic error", 2: "invalid layer id"}
+MOVE_LAYER_ERRORS = {1: "generic error", 2: "invalid layer", 3: "invalid destination"}
 
 
 class Client:
@@ -277,7 +278,7 @@ class Client:
     def set_binding(self, layer_id: int, position: int, behavior: int,
                     param1: int = 0, param2: int = 0):
         binding = sint(1, behavior) + vint(2, param1) + vint(3, param2)
-        body = vint(1, layer_id) + sint(2, position) + msg(3, binding)
+        body = vint(1, layer_id) + vint(2, position) + msg(3, binding)  # key_position is int32, not sint32
         code = self._req(KEYMAP, 2, body)[2][-1]
         if code:
             raise StudioError(SET_BINDING.get(code, f"error {code}"))
@@ -300,6 +301,13 @@ class Client:
             raise StudioError(errors.get(d[2][-1], f"error {d[2][-1]}"))
         ok = _one(d, 1, b"")
         return decode(ok) if isinstance(ok, bytes) else {}
+
+    def move_layer(self, start: int, dest: int) -> dict:
+        """Move the layer at index `start` to `dest`: the keymap as it is after."""
+        d = self._result(8, vint(1, start) + vint(2, dest), MOVE_LAYER_ERRORS)
+        return {"layers": [_layer(decode(l)) for l in d.get(1, [])],
+                "available_layers": _one(d, 2, 0),
+                "max_layer_name_length": _one(d, 3, 0)}
 
     def add_layer(self) -> dict:
         """Turn on the next reserved layer: {index, layer}."""
