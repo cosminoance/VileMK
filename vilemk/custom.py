@@ -57,6 +57,7 @@ DIRS = {"viledance": os.path.join(CUSTOM_DIR, "viledance"),
 # Display names for modules, {module: alias}. Only the page reads it; west.yml,
 # `.zmk/modules/` and every API keep the real name.
 MODULE_NAMES = os.path.join(CUSTOM_DIR, "module-names.json")
+STUDIO_KEYBOARDS = os.path.join(CUSTOM_DIR, "studio-keyboards.json")
 
 VILE_SLOTS = ("tap", "hold", "double_tap", "tap_hold")
 FLAVORS = ("hold-preferred", "balanced", "tap-preferred", "tap-unless-interrupted")
@@ -128,6 +129,30 @@ def module_names() -> dict:
         return {}
     return {k: v for k, v in data.items() if isinstance(v, str)} \
         if isinstance(data, dict) else {}
+
+
+def studio_keyboards() -> dict:
+    """Which keymap id each Studio keyboard was matched to, by its serial (or name)."""
+    try:
+        with open(STUDIO_KEYBOARDS, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, str)} \
+        if isinstance(data, dict) else {}
+
+
+def set_studio_keyboard(key: str, keymap_id: str) -> dict:
+    """Match keyboard `key` to `keymap_id`; a blank id records "none"."""
+    if not key:
+        raise ValueError("no keyboard named")
+    found = studio_keyboards()
+    found[key] = keymap_id
+    os.makedirs(CUSTOM_DIR, exist_ok=True)
+    with open(STUDIO_KEYBOARDS, "w", encoding="utf-8") as fh:
+        json.dump(found, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return found
 
 
 def set_module_name(module: str, alias: str) -> dict:

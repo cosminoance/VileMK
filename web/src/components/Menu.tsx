@@ -3,8 +3,10 @@
 
 import { menuFields, menuTarget, activeFieldOf, KEY_FIELD } from "../lib/fields";
 import type { Mode } from "../lib/drafts";
+import { useContext } from "react";
+
 import { useStore } from "../state/store";
-import { PickerBody } from "./Picker";
+import { PickerBody, StudioPickCtx } from "./Picker";
 
 const PTABS: [string, string][] = [
   ["keyboard","Keyboard"], ["system","Media & system"],
@@ -25,11 +27,16 @@ function targetText(editing: number | null, field: string | null,
 
 export function Menu({ layer }: { layer: any }) {
   const { s, d } = useStore();
-  const t = menuTarget(s, layer);
+  const sp = useContext(StudioPickCtx);
+  const t = sp ? { cur: sp.cur, exclude: [] as Mode[] } : menuTarget(s, layer);
   const tabs = PTABS.filter(([v]) => !t.exclude.includes(v as Mode));
-  const ptab = t.exclude.includes(s.ptab as Mode) ? "keyboard" : s.ptab;
-  const field = activeFieldOf(s);
+  // Studio cannot add combos or conditional layers, so their tabs are dimmed there.
+  const board = PTABS.slice(PTABS.findIndex(([v]) => v === FIRST_BOARD_TAB)).map(([v]) => v);
+  const off = (v: string) => !!sp && board.includes(v);
+  const ptab = t.exclude.includes(s.ptab as Mode) || off(s.ptab) ? "keyboard" : s.ptab;
+  const field = sp ? KEY_FIELD : activeFieldOf(s);
   const label = menuFields(s).find((f) => f.key === field)?.label;
+  const editing = sp ? sp.editing : s.editing;
 
   return (
     <div className="menu">
@@ -37,7 +44,9 @@ export function Menu({ layer }: { layer: any }) {
         {tabs.map(([v, l]) => (
           <span key={v} style={{ display: "contents" }}>
             {v === FIRST_BOARD_TAB && <span className="sep" />}
-            <button className={ptab === v ? "sel" : ""}
+            <button className={ptab === v ? "sel" : ""} disabled={off(v)}
+                    title={off(v) ? "Studio cannot add these to the keyboard. Switch them "
+                      + "on in Firmware mode, build and flash." : undefined}
                     onClick={() => d({ t: "ptab", tab: v })}>{l}</button>
           </span>
         ))}
@@ -45,7 +54,8 @@ export function Menu({ layer }: { layer: any }) {
                 onClick={() => d({ t: "picker", on: !s.picker })}>
           {s.picker ? "Hide" : "Show"}
         </button>
-        <span className="ptarget">{targetText(s.editing, field, label)}</span>
+        <span className="ptarget">{!sp || editing !== null ? targetText(editing, field, label)
+                                   : "→ nothing to fill: click a key on the board"}</span>
       </div>
       <div className={"picker" + (s.picker ? "" : " hidden")}>
         <PickerBody cur={t.cur} ptab={ptab} />

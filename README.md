@@ -55,7 +55,7 @@ further down.
 
 ### 1. Requirements
 
-- **Python 3.9+.** The Python side has no dependencies.
+- **Python 3.9+.** The one dependency, pyserial (to talk to a keyboard over USB), installs itself into `.venv/` in the checkout on first start if it is missing.
 - **Node**, to build the web app. `make design` does it for you.
 - **Docker**, for the build itself. Your user has to be able to run `docker`
   without sudo (on Linux, be in the `docker` group). Without Docker the app

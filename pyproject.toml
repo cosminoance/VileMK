@@ -1,7 +1,7 @@
-# The Python equivalent of package.json. `dependencies` is empty on purpose:
-# every tool here runs on the standard library alone, so there is nothing to
-# install before using them. Installing this project only puts the commands
-# below on your PATH.
+# The Python equivalent of package.json. Every tool runs on the standard library
+# except `vilemk.studio`, which needs pyserial to reach a keyboard over USB.
+# `vilemk/deps.py` installs it into .venv/ on first start when it is missing.
+# Installing this project puts the commands below on your PATH.
 
 [project]
 name = "vilemk"
@@ -9,7 +9,7 @@ version = "0.3.5"
 description = "Design, check and build ZMK keymaps"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = []
+dependencies = ["pyserial>=3.5"]
 
 [project.optional-dependencies]
 dev = ["ruff>=0.6"]
@@ -20,6 +20,7 @@ vilemk-check = "vilemk.check:main"
 vilemk-design = "vilemk.webui.server:main"
 vilemk-workspace = "vilemk.workspace:main"
 vilemk-build = "vilemk.firmware:main"
+vilemk-studio = "vilemk.studio:main"
 
 [build-system]
 requires = ["setuptools>=64"]

@@ -63,6 +63,8 @@ export interface State {
   emode: Mode | null;
   drafts: Partial<Record<Mode, any>>;
   assign: Record<number, Record<number, string>>;
+  /** Studio keys sent since the keyboard's last save or discard, by layer id. */
+  studioPending: Record<number, Record<number, string>>;
   msg: Msg | null;
   dts: string | null;
   editing: number | null;
@@ -106,7 +108,7 @@ export const initialState = (data: any): State => {
     mode: v.mode === "studio" ? "studio" : "firmware",
     id: known ? v.id! : (data.keymaps[0] || {}).id || null,
     layer: 0, layout: 0, base: "", nums: v.nums ?? true, hot: null,
-    emode: null, drafts: {}, assign: {}, msg: null, dts: null,
+    emode: null, drafts: {}, assign: {}, studioPending: {}, msg: null, dts: null,
     editing: null, picker: true, ptab: "keyboard",
     newLayers: {}, dropLayers: {}, reset: {}, parts: {}, prep: {}, build: false,
     activeField: null, keyVal: "",
@@ -157,6 +159,7 @@ export type Action =
   | { t: "assign"; pos: number; v: string; close?: boolean; msg?: Msg | null }
   | { t: "swap"; from: number; to: number; file: (string | undefined)[] }
   | { t: "clearAssign"; kmId: string }
+  | { t: "studioPending"; pending: Record<number, Record<number, string>> }
   | { t: "openPanel"; mode: Mode; draft?: any }
   | { t: "closePanel" }
   | { t: "draft"; mode: Mode; draft: any | ((prev: any) => any) }
@@ -191,6 +194,7 @@ export function reducer(s: State, a: Action): State {
     case "dts": return { ...s, dts: a.dts };
     case "picker": return { ...s, picker: a.on };
     case "ptab": return { ...s, ptab: a.tab };
+    case "studioPending": return { ...s, studioPending: a.pending };
     case "reset": return { ...s, reset: { ...s.reset, [a.kmId]: a.on } };
     case "part":
       return { ...s, parts: { ...s.parts,

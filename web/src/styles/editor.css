@@ -73,6 +73,8 @@ button.act.sm{padding:3px 12px;font-size:12px}
 .pk.td{width:auto;height:auto;min-height:38px;padding:4px 12px;align-items:flex-start;
   font-family:var(--font)}
 .pk.off{opacity:.4;pointer-events:none}
+.pk.na{opacity:.4;cursor:not-allowed}
+.pkedit:disabled,.picktabs button:disabled{opacity:.4;cursor:not-allowed}
 .picker{margin-top:14px;overflow-x:auto;padding-bottom:8px}
 .picker.hidden{display:none}
 .picker .prow{display:flex;gap:4px;margin-bottom:4px}
@@ -98,7 +100,7 @@ button.act.sm{padding:3px 12px;font-size:12px}
 .pkedit{border:1px solid var(--key-line);border-left:0;border-radius:0 5px 5px 0;
   background:var(--key);color:var(--muted);cursor:pointer;padding:0 8px;
   font:11px/1 var(--font)}
-.pkedit:hover{color:var(--accent);border-color:var(--accent)}
+.pkedit:hover:not(:disabled){color:var(--accent);border-color:var(--accent)}
 /* Was `#kb-picker > .hint`: the picker is a component now, not an id. */
 .picker > .hint{max-width:640px}
 .blist{display:flex;flex-direction:column;gap:6px;max-width:640px}

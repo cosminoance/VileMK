@@ -1,3 +1,5 @@
+import { createContext, useContext } from "react";
+
 import {
   bindOf, layerBinding, layerTitle, modBinding, usesLayer,
 } from "../lib/bindings";
@@ -15,6 +17,29 @@ import {
 import { previewBinding, toggleScope } from "../state/actions";
 import { draftOf, useStore } from "../state/store";
 
+// --------------------------------------------------------------- studio mode
+/** Provided by Studio mode: picks go to the keyboard, and whatever its firmware
+ *  has no behavior for is dimmed. */
+export interface StudioPick {
+  /** The open key, or null. */
+  editing: number | null;
+  /** Layer index shown, for the key editor's heading. */
+  layer: number;
+  /** What the open key held at the keyboard's last save. */
+  saved: string;
+  close: () => void;
+  pick: (v: string) => void;
+  setField: (v: string) => void;
+  cur: string;
+  /** Why a binding cannot go on this keyboard, or null when it can. */
+  why: (v: string) => string | null;
+  layers: [number, string][];
+}
+export const StudioPickCtx = createContext<StudioPick | null>(null);
+
+const BUILD_TIP = "Studio cannot add behaviors to the keyboard. Create or edit "
+  + "this in Firmware mode, build and flash, and it can be bound here.";
+
 // ----------------------------------------------------------- filling a field
 // With the key editor open a pick is already the whole answer - clicking A on
 // the Keyboard tab cannot mean anything but `&kp A` - so it is assigned and the
@@ -23,7 +48,9 @@ import { draftOf, useStore } from "../state/store";
 // with what is in the field, so they are not finished bindings.
 export function usePick() {
   const { s, d } = useStore();
+  const sp = useContext(StudioPickCtx);
   const field = activeFieldOf(s);
+  if (sp) return { pick: sp.pick, setField: sp.setField, field: KEY_FIELD, cur: sp.cur };
 
   const setField = (v: string) => {
     if (!field)
@@ -46,14 +73,16 @@ export function usePick() {
 // ------------------------------------------------------------ the key grids
 function PickerKey({ ent, cur, off, onPick }:
     { ent: PickerEntry; cur: string; off?: boolean; onPick: (b: string) => void }) {
+  const sp = useContext(StudioPickCtx);
   const [lbl, code, w] = ent;
   const width = { width: w * 36 - 4 };
   if (!code) return <span className="sp" style={width} />;
   const b = bindOf(code);
+  const why = sp && sp.why(b);
   const parts = Array.isArray(lbl) ? lbl : lbl.split("|");
   return (
-    <button type="button" title={b} style={width}
-            className={"pk" + (b === cur ? " sel" : "") + (off ? " off" : "")}
+    <button type="button" title={why ? `${b}: ${why}` : b} style={width} disabled={!!why}
+            className={"pk" + (b === cur ? " sel" : "") + (off ? " off" : "") + (why ? " na" : "")}
             onClick={() => onPick(b)}>
       {parts.length > 1 && <span className="up">{parts[0]}</span>}
       <span>{parts.length > 1 ? parts[1] : parts[0]}</span>
@@ -123,8 +152,9 @@ export function System({ cur, onPick, kpOnly }:
 // screen.
 export function NewRow({ mode, label: lbl }: { mode: Mode; label: string }) {
   const { s, d } = useStore();
+  const sp = useContext(StudioPickCtx);
   const draft = s.drafts[mode];
-  const dirty = s.emode !== mode && isDirty(mode, draft);
+  const dirty = !sp && s.emode !== mode && isDirty(mode, draft);
   return (
     <div className="rowbtns">
       {dirty &&
@@ -132,7 +162,7 @@ export function NewRow({ mode, label: lbl }: { mode: Mode; label: string }) {
                 onClick={() => d({ t: "openPanel", mode })}>
           Resume {draft.name || "unnamed " + lbl}…
         </button>}
-      <button type="button" className="ghost sm"
+      <button type="button" className="ghost sm" disabled={!!sp} title={sp ? BUILD_TIP : undefined}
               onClick={() => d({ t: "openPanel", mode, draft: BLANK[mode]() })}>
         + New {lbl}…
       </button>
@@ -144,9 +174,11 @@ export function NewRow({ mode, label: lbl }: { mode: Mode; label: string }) {
 // the record in the editor area above.
 function CardEdit({ mode, name }: { mode: Mode; name: string }) {
   const { s, d } = useStore();
+  const sp = useContext(StudioPickCtx);
   const rec = recordOf(s.store, mode, name);
   return (
-    <button type="button" className="pkedit" title={"edit " + name}
+    <button type="button" className="pkedit" disabled={!!sp}
+            title={sp ? BUILD_TIP : "edit " + name}
             onClick={() => rec && d({ t: "openPanel", mode,
                                       draft: JSON.parse(JSON.stringify(rec)) })}>
       ✎
@@ -154,14 +186,18 @@ function CardEdit({ mode, name }: { mode: Mode; name: string }) {
   );
 }
 
-function Card({ mode, name, sel, title, main, up, onClick }: {
+// `bind` is what the card puts on a key, checked against the keyboard in Studio mode.
+function Card({ mode, name, sel, title, main, up, bind, onClick }: {
   mode: Mode; name: string; sel: boolean; title: string;
-  main: string; up: string; onClick: () => void;
+  main: string; up: string; bind: string | string[]; onClick: () => void;
 }) {
+  const sp = useContext(StudioPickCtx);
+  const whys = sp ? [bind].flat().map(sp.why) : [];
+  const why = whys.length && whys.every(Boolean) ? whys[0] : null;
   return (
     <span className="pkg">
-      <button type="button" className={"pk td" + (sel ? " sel" : "")}
-              title={title} onClick={onClick}>
+      <button type="button" className={"pk td" + (sel ? " sel" : "") + (why ? " na" : "")}
+              disabled={!!why} title={why ? `${title}\n\n${why}` : title} onClick={onClick}>
         <span>{main}</span><span className="up">{up}</span>
       </button>
       <CardEdit mode={mode} name={name} />
@@ -183,7 +219,7 @@ export function ViledanceTab({ cur }: { cur: string }) {
       {items.map((t) => (
         <Card key={t.name} mode="viledance" name={t.name}
               sel={usesVd(cur, t.name)} title={vdTitle(t)}
-              main={"&" + t.name}
+              main={"&" + t.name} bind={[`&vd_${t.name}`, `&ht_${t.name}`]}
               up={[t.tap, t.hold, t.double_tap, t.tap_hold].filter(Boolean).join("  /  ")}
               onClick={async () => {
                 const b = await previewBinding(d, "viledance", t);
@@ -214,7 +250,7 @@ export function MacroTab({ cur }: { cur: string }) {
       {items.map((m) => (
         <Card key={m.name} mode="macro" name={m.name}
               sel={macroBinding(m) === cur} title={macroTitle(m)}
-              main={"&mc_" + m.name} up={macroSummary(m)}
+              main={"&mc_" + m.name} up={macroSummary(m)} bind={macroBinding(m)}
               onClick={() => pick(macroBinding(m))} />
       ))}
     </div>
@@ -236,7 +272,7 @@ export function ModifierTab({ cur }: { cur: string }) {
       {items.map((m) => (
         <Card key={m.name} mode="modifier" name={m.name}
               sel={modBinding(m) === cur} title={modBinding(m)}
-              main={m.name} up={modBinding(m)}
+              main={m.name} up={modBinding(m)} bind={modBinding(m)}
               onClick={async () => {
                 const b = await previewBinding(d, "modifier", m);
                 if (b !== null) pick(b);
@@ -254,24 +290,32 @@ export function ModifierTab({ cur }: { cur: string }) {
 export function LayerTab({ cur }: { cur: string }) {
   const { s, d } = useStore();
   const { pick, setField } = usePick();
+  const sp = useContext(StudioPickCtx);
   const km = byId(s.data.keymaps, s.id);
-  const rows = layerRows(layersOf(km, km ? s.newLayers[km.id] : [], s.layout));
+  const rows = sp ? sp.layers
+    : layerRows(layersOf(km, km ? s.newLayers[km.id] : [], s.layout));
   const code = ltCode(cur);
   const sel = (bind: string) => !!bind && bind === (cur || "").trim();
 
   // Four of the five rows are whole bindings, so they are ordinary picks. `&lt`
   // composes with the keycode the field already holds, so it has its own.
-  const Cell = ({ n, name, bind }: { n: number; name: string; bind: string }) => (
-    <button type="button" className={"pk" + (sel(bind) ? " sel" : "")}
-            style={{ width: 68 }} title={bind} onClick={() => pick(bind)}>
-      <span className="up">{name || "layer " + n}</span><span>{n}</span>
-    </button>
-  );
+  const Cell = ({ n, name, bind }: { n: number; name: string; bind: string }) => {
+    const why = sp && sp.why(bind);
+    return (
+      <button type="button" className={"pk" + (sel(bind) ? " sel" : "") + (why ? " na" : "")}
+              style={{ width: 68 }} title={why ? `${bind}: ${why}` : bind} disabled={!!why}
+              onClick={() => pick(bind)}>
+        <span className="up">{name || "layer " + n}</span><span>{n}</span>
+      </button>
+    );
+  };
   const LtCell = ({ n, name }: { n: number; name: string }) => {
     const bind = code ? `&lt ${n} ${code}` : "";
+    const why = sp && sp.why(`&lt ${n} ${code || "A"}`);
     return (
-      <button type="button" className={"pk" + (sel(bind) ? " sel" : "")}
-              style={{ width: 68 }} title={bind || `&lt ${n} <key>`}
+      <button type="button" className={"pk" + (sel(bind) ? " sel" : "") + (why ? " na" : "")}
+              style={{ width: 68 }} disabled={!!why}
+              title={why ? `&lt: ${why}` : bind || `&lt ${n} <key>`}
               onClick={() => setField(`&lt ${n}${code ? " " + code : ""}`)}>
         <span className="up">{name || "layer " + n}</span><span>{n}</span>
       </button>
@@ -314,7 +358,7 @@ export function LayerTab({ cur }: { cur: string }) {
         {items.map((r) => (
           <Card key={r.name} mode="layer" name={r.name}
                 sel={usesLayer(cur, r)} title={layerTitle(r)}
-                main={r.name} up={layerBinding(r)}
+                main={r.name} up={layerBinding(r)} bind={layerBinding(r)}
                 onClick={async () => {
                   const b = await previewBinding(d, "layer", r);
                   if (b !== null) pick(b);
@@ -426,7 +470,8 @@ export function ConditionalTab() {
 export function PickerBody({ cur, ptab }: { cur: string; ptab: string }) {
   const { s } = useStore();
   const { pick } = usePick();
-  const kpOnly = s.editing === null && s.emode === "layer";
+  const sp = useContext(StudioPickCtx);
+  const kpOnly = !sp && s.editing === null && s.emode === "layer";
   switch (ptab) {
     case "system": return <System cur={cur} onPick={pick} kpOnly={kpOnly} />;
     case "viledance": return <ViledanceTab cur={cur} />;
