@@ -50,6 +50,8 @@ export interface State {
   filter: string;
   /** Sidebar open. Collapsing it gives the board the whole width. */
   rail: boolean;
+  /** Firmware edits the compiled keymap; Studio talks to a connected keyboard. */
+  mode: AppMode;
 
   id: string | null;
   layer: number;
@@ -82,10 +84,12 @@ export interface State {
   imp: Importing | null;
 }
 
-// The keymap shown, the sidebar and the key-position toggle survive a reload.
+export type AppMode = "firmware" | "studio";
+
+// The keymap shown, the sidebar, the mode and the key-position toggle survive a reload.
 // Per browser; storage can be missing or refuse, and then the defaults apply.
 const VIEW = "vilemk.view";
-type View = Partial<Pick<State, "id" | "rail" | "nums">>;
+type View = Partial<Pick<State, "id" | "rail" | "mode" | "nums">>;
 function readView(): View {
   try { return JSON.parse(localStorage.getItem(VIEW) || "{}") || {}; }
   catch { return {}; }
@@ -99,6 +103,7 @@ export const initialState = (data: any): State => {
     store: data.custom || {viledance:[], combo:[], modifier:[], layer:[], macro:[]},
     filter: "",
     rail: v.rail ?? true,
+    mode: v.mode === "studio" ? "studio" : "firmware",
     id: known ? v.id! : (data.keymaps[0] || {}).id || null,
     layer: 0, layout: 0, base: "", nums: v.nums ?? true, hot: null,
     emode: null, drafts: {}, assign: {}, msg: null, dts: null,
@@ -128,6 +133,7 @@ export type Action =
   | { t: "store"; store: any }
   | { t: "filter"; v: string }
   | { t: "rail"; on: boolean }
+  | { t: "mode"; mode: AppMode }
   | { t: "select"; id: string | null }
   | { t: "layer"; n: number }
   | { t: "layout"; n: number }
@@ -171,6 +177,7 @@ export function reducer(s: State, a: Action): State {
     case "store": return { ...s, store: a.store };
     case "filter": return { ...s, filter: a.v };
     case "rail": return { ...s, rail: a.on };
+    case "mode": return { ...s, mode: a.mode };
 
     case "select":
       return { ...s, id: a.id, layer: 0, layout: 0, hot: null, msg: null };
@@ -337,9 +344,9 @@ export function StoreProvider({ data, children }:
     { data: any; children: ReactNode }) {
   const [s, d] = useReducer(reducer, data, initialState);
   useEffect(() => {
-    try { localStorage.setItem(VIEW, JSON.stringify({ id: s.id, rail: s.rail, nums: s.nums })); }
+    try { localStorage.setItem(VIEW, JSON.stringify({ id: s.id, rail: s.rail, mode: s.mode, nums: s.nums })); }
     catch { /* no storage: the defaults apply next time */ }
-  }, [s.id, s.rail, s.nums]);
+  }, [s.id, s.rail, s.mode, s.nums]);
   return <Ctx.Provider value={{ s, d }}>{children}</Ctx.Provider>;
 }
 
