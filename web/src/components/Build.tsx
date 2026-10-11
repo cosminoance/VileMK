@@ -40,8 +40,24 @@ type Job = {
   drivers?: ModDriver[];
   folder?: string;
   path?: string;
-  docker?: { ok: boolean; reason: string };
+  docker?: Docker;
 };
+
+type Docker = { ok: boolean; reason: string; fix: string; cmds: string[] };
+
+/** Why a build cannot reach Docker, with this OS's fix in a tip. */
+function DockerWarn({ docker, tail = "" }: { docker: Docker; tail?: string }) {
+  return (
+    <div className="warn">
+      Building needs Docker: {docker.reason}.{tail}
+      {docker.fix &&
+        <> <Help label="how to fix it">
+          To fix it, {docker.fix}{docker.cmds.length ? ":" : "."}
+          {docker.cmds.map((c) => <code key={c} className="cmd">{c}</code>)}
+        </Help></>}
+    </div>
+  );
+}
 
 type CiRewrite = { module: string; old: string; new: string; file: string };
 type ModDriver = Driver & { module: string };
@@ -159,13 +175,13 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
   const noStudio = !bindsStudioUnlock(km);
   const block = own ? buildBlock(s, km) : null;
   const has = offered.filter((p) => parts[p.id]).map((p) => p.shield);
-  const docker = s.data.build;
+  const docker: Docker | undefined = s.data.build;
   const noDocker = !!docker && !docker.ok;
   // Why Build is off, or what it will leave out, said where it is seen:
   // under the button, and in the heading while the panel is closed.
   const note = !own
     ? "Save this keymap as a variant first (Save as\u2026), then build the variant."
-    : noDocker ? `Building needs Docker: ${docker.reason}. Everything else works without it.`
+    : noDocker ? null
     : block ? `Build: ${block}.`
     : dirty ? `${dirty} unsaved change(s) are not in the build. Save first to include them.`
     : null;
@@ -235,6 +251,7 @@ export function BuildPanel({ km, dirty }: { km: any; dirty: number }) {
           </button>
         </span>
       </div>
+      {noDocker && <DockerWarn docker={docker} tail=" Everything else works without it." />}
       {note && <div className="warn">{note}</div>}
       <div className="hint">These go into the variant's build.yaml when you save or build.</div>
     </Fold>
@@ -431,8 +448,7 @@ function BuildSheet({ name, kmId, dirty, choices, confs, noFlash, close, flash }
         <span className="path">{job?.folder || `variants/${name}/firmware`}/</span>
       </div>
 
-      {docker && !docker.ok &&
-        <div className="warn">Building needs Docker: {docker.reason}.</div>}
+      {docker && !docker.ok && <DockerWarn docker={docker} />}
       {job?.problem && <div className="warn">{job.problem}</div>}
       {!!dirty &&
         <div className="warn">

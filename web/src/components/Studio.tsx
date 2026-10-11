@@ -15,6 +15,7 @@ import {
   buildChoices, byId, choicesBody, scopeOf, scopeOn, scopeReserved, slugify,
 } from "../lib/keymaps";
 import { label } from "../lib/labels";
+import { REPO_URL } from "../lib/repo";
 import { HEADS } from "../lib/zmkcodes";
 import { saveItem, saveVariant, setComboState } from "../state/actions";
 import type { AppMode, Msg } from "../state/store";
@@ -115,7 +116,12 @@ function writeBlock(km: any, diff: FileDiff | null, unsaved: boolean, total: num
   return null;
 }
 
-interface Port { port: string; name: string; serial: string }
+/** `refused`: Linux would not let this user open the port; `cmd` is "" when only
+ *  the session predates a group the user is already in. */
+interface Port { port: string; name: string; serial: string;
+  refused?: { group: string; cmd: string } }
+
+const SERIAL_HELP = `${REPO_URL}/blob/main/TROUBLESHOOTING.md#linux-serial-port-access`;
 interface Loaded {
   info: { name: string; serial: string };
   /** The keyboard's layers without the vile slots layer. */
@@ -279,7 +285,18 @@ export function StudioView() {
             {" "}<code>CONFIG_ZMK_STUDIO=y</code>. A port the official Studio app holds is not
             listed.</p>
         : <ul className="ports">
-            {ports.map((p) => (
+            {ports.map((p) => p.refused ? (
+              <li key={p.port} className="refused">
+                <span><b>{p.port}</b>: {p.refused.cmd
+                  ? <>this account may not open it. Run in a terminal:
+                      <code className="cmd">{p.refused.cmd}</code>
+                      then log out of your desktop session, log back in, and press <b>Look again</b>.</>
+                  : <>you are in the <code>{p.refused.group}</code> group, but this session
+                      started before you were added. Log out of your desktop session, log back
+                      in, and press <b>Look again</b>.</>}
+                  {" "}<a href={SERIAL_HELP} target="_blank" rel="noopener noreferrer">More in Troubleshooting</a></span>
+              </li>
+            ) : (
               <li key={p.port}>
                 <span><b>{p.name || "keyboard"}</b> <span className="path">{p.port}</span></span>
                 <button className="act" disabled={busy} onClick={() => connect(p.port)}>

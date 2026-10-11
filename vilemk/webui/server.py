@@ -218,6 +218,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 return self._send(400, {"error": str(exc)})
             return self._send(200, {"files": files, "drives": flash.drives(),
+                                    "unmounted": flash.unmounted(),
                                     **firmware.firmware_state(name)})
         if self.path.startswith("/api/studio/"):
             return self._studio("GET", self.path[len("/api/studio/"):], {})
@@ -1148,14 +1149,18 @@ def _forget_scope(scope: str) -> None:
 def run(host: str = "127.0.0.1", port: int = PORT, open_browser: bool = True) -> int:
     """Bind and serve until ctrl-c. Returns the process exit status."""
     try:
+        # SO_REUSEADDR on Windows lets a second server bind a port in use.
+        ThreadingHTTPServer.allow_reuse_address = sys.platform != "win32"
         httpd = ThreadingHTTPServer((host, port), Handler)
     except OSError as e:
         if e.errno != errno.EADDRINUSE:
             raise
+        stop = ("close the other VileMK window" if sys.platform == "win32"
+                else "pkill -f 'vilemk.webui.server'")
         print(f"port {port} is already in use - an older server is probably"
               f" still running.\n"
-              f"  stop it:  pkill -f 'vilemk.webui.server'\n"
-              f"  or:       python3 -m vilemk.webui.server --port {port + 1}",
+              f"  stop it:  {stop}\n"
+              f"  or:       python -m vilemk.webui.server --port {port + 1}",
               file=sys.stderr)
         return 1
     url = f"http://{host}:{port}/"
@@ -1189,6 +1194,19 @@ def main() -> int:
     atexit.register(firmware.JOB.cancel)
     print(f"# project: {PROJECT_DIR}")
     print(f"# store: {custom.CUSTOM_DIR}")
+    # A fresh checkout has no ZMK board data, so the built-in keyboards list is empty.
+    if not workspace.zmk_info()["fetched"]:
+        print("# fetching ZMK board data from GitHub (first start)")
+        try:
+            r = workspace.install_zmk()
+            print(f"# ZMK {r['ref']} at {r['revision'][:12]}")
+        except workspace.WorkspaceError as exc:
+            retry = "; use Settings to retry" if getattr(exc, "retry", True) else ""
+            print(f"# could not fetch ZMK: {exc}{retry}", file=sys.stderr)
+    docker = firmware.docker_status()
+    if not docker["ok"]:
+        print(f"# building firmware needs Docker: {firmware.docker_message(docker)}",
+              file=sys.stderr)
     return run(args.host, args.port, open_browser=not args.no_open)
 
 

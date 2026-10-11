@@ -4,6 +4,7 @@
 
 - [Flashing](#flashing)
 - [Studio mode](#studio-mode)
+  - [Linux: serial port access](#linux-serial-port-access)
 - [Keyboard modules](#keyboard-modules)
   - [What a module needs](#what-a-module-needs)
   - [Repositories VileMK prepares](#repositories-vilemk-prepares)
@@ -49,9 +50,46 @@ again.
   over USB only, not Bluetooth.
 - Another program holds the port, such as the official ZMK Studio app or a
   serial monitor. Close it and **Look again**.
-- On Linux, your user may not be allowed to open serial ports. Add yourself
-  to the group that owns `/dev/ttyACM*` (`dialout` on Debian and Ubuntu,
-  `uucp` on Arch), log out and in again, then **Look again**.
+- On Linux, your user may not be allowed to open the keyboard's serial port.
+  See [Linux: serial port access](#linux-serial-port-access).
+
+### Linux: serial port access
+
+Studio mode talks to the keyboard over a USB serial port, `/dev/ttyACM*`. A
+user outside the group that owns it cannot open it, and the keyboard is not
+listed. This shows the group (`root uucp` means group `uucp`):
+
+```bash
+ls -l /dev/ttyACM*
+```
+
+Add your user to that group, then log out of your desktop session and back in:
+
+```bash
+sudo usermod -aG uucp $USER
+```
+
+That is the Arch group. On Ubuntu, Debian and Fedora it is `dialout`:
+
+```bash
+sudo usermod -aG dialout $USER
+```
+
+To check, `id` lists the groups of the current session.
+
+Instead of the group, a udev rule lets the user at the screen open the port,
+with no logout. Run this, then unplug and replug the keyboard:
+
+```bash
+echo 'SUBSYSTEM=="tty", KERNEL=="ttyACM*", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-zmk-studio.rules && sudo udevadm control --reload && sudo udevadm trigger
+```
+
+A udev rule for Vial and similar tools (`KERNEL=="hidraw*"`) does not cover
+this: it matches HID devices, not serial ports.
+
+Flashing needs neither. In its bootloader the keyboard is a USB drive and the
+Flash sheet copies a file onto it; on Linux the drive only has to be mounted
+(desktops do it on their own, otherwise the sheet shows the mount command).
 
 ### The page says the keyboard is locked
 
