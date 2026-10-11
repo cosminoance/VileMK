@@ -40,6 +40,33 @@ VileMK is vile, as in ruthless.
 - [Troubleshooting](TROUBLESHOOTING.md)
 - [Command line and keyboard list details](CLI.md)
 
+<details>
+<summary>VileMK compared with ZMK Studio</summary>
+
+| Feature | VileMK | ZMK Studio |
+| --- | --- | --- |
+| Edit keys live over USB, no flash | Yes | Yes |
+| Add, delete, rename and move layers live | Yes | Yes |
+| Use behaviors already in the firmware | Yes | Yes |
+| Runs with no install (web or desktop app) | No, runs locally with Python and Docker | Yes |
+| Keyboard picker: every keyboard in ZMK and installed modules, or a module fetched from GitHub | Yes | No, edits only the keyboard plugged in |
+| Edit the keymap file itself (variants, vendor defaults kept untouched) | Yes | No |
+| Create combos, macros, VileDances (tap dances), hold-taps, mod-morphs, conditional layers | Yes, then build and flash | No |
+| Create and edit VileDances live | Yes, after a one-time flash of a vile slots build from VileMK | No |
+| Switch combos on and off and change their outputs live | Yes, after a one-time flash of a vile slots build from VileMK | No |
+| Pickers for keys, behaviors, combos and VileDances | Yes | Keys and behaviors only |
+| Saved combos and VileDances, reused across keymaps | Yes | No |
+| Import a layer from another keyboard, leaving out chosen keys | Yes | No |
+| Import a `.keymap` file from another config | Yes | No |
+| Drag a key onto another to swap them | Yes | No |
+| Compare with another keymap, or the keyboard with its keymap file | Yes | No |
+| Save the keyboard's live state as a keymap variant | Yes | No |
+| Build firmware and flash it from the app | Yes | No |
+| Warn before flashing firmware that differs from the keyboard | Yes | No |
+| Export the keymap as a picture or a `.keymap` file | Yes | No |
+
+</details>
+
 ## Words used here
 
 <details>
