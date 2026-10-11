@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import sys
 import tarfile
 import tempfile
@@ -88,6 +89,30 @@ def parse_github(url: str):
     return m.group("owner"), m.group("repo")
 
 
+def _unreachable(exc) -> WorkspaceError:
+    """`could not reach GitHub`. On macOS with no CA bundle, the fix for this Python's
+    install instead, and `retry` False since retrying cannot help."""
+    reason = getattr(exc, "reason", exc)
+    if not (sys.platform == "darwin" and isinstance(reason, ssl.SSLCertVerificationError)
+            and "unable to get local issuer certificate" in (reason.verify_message or "")):
+        return WorkspaceError(f"could not reach GitHub: {reason}")
+    v = f"{sys.version_info.major}.{sys.version_info.minor}"
+    pyorg = f'open "/Applications/Python {v}/Install Certificates.command"'
+    brew = "brew reinstall ca-certificates openssl@3"
+    if sys.prefix.startswith("/Library/Frameworks/Python.framework"):
+        msg = f"this Python has no certificates installed. Run `{pyorg}`, then restart VileMK."
+    elif sys.prefix.startswith(("/opt/homebrew", "/usr/local")):
+        msg = (f"Homebrew's certificates are missing or out of date. Run `{brew}`, "
+               f"then restart VileMK.")
+    else:
+        msg = (f"certificate check failed ({reason.verify_message}). With Python from "
+               f"python.org run `open \"/Applications/Python X.Y/Install Certificates.command\"`; "
+               f"with Homebrew run `{brew}`. Then restart VileMK.")
+    err = WorkspaceError(f"could not reach GitHub: {msg}")
+    err.retry = False
+    return err
+
+
 def _get(url: str, accept: str = ""):
     req = urllib.request.Request(url, headers={"User-Agent": UA,
                                                **({"Accept": accept} if accept else {})})
@@ -118,8 +143,7 @@ def resolve(owner: str, repo: str, ref: str) -> str:
         raise WorkspaceError(f"GitHub answered {exc.code} for {owner}/{repo}@{ref}") \
             from None
     except (urllib.error.URLError, OSError) as exc:
-        raise WorkspaceError(f"could not reach GitHub: {getattr(exc, 'reason', exc)}") \
-            from None
+        raise _unreachable(exc) from None
     if not SHA_RE.match(sha):
         raise WorkspaceError(f"GitHub returned something that is not a commit for "
                              f"{owner}/{repo}@{ref}")
@@ -138,8 +162,7 @@ def _api_json(url: str, what: str):
                                  "(60 an hour) is used up; try again later") from None
         raise WorkspaceError(f"GitHub answered {exc.code} for {what}") from None
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise WorkspaceError(f"could not reach GitHub: {getattr(exc, 'reason', exc)}") \
-            from None
+        raise _unreachable(exc) from None
 
 
 LINE_TAG_RE = re.compile(r"^v(\d+)\.(\d+)$")
@@ -263,8 +286,7 @@ def fetch(owner: str, repo: str, sha: str, dest: str, prefixes=None, check=None)
             raise WorkspaceError(f"downloading {owner}/{repo}@{sha[:7]} failed "
                                  f"({exc.code})") from None
         except (urllib.error.URLError, OSError) as exc:
-            raise WorkspaceError(f"could not reach GitHub: "
-                                 f"{getattr(exc, 'reason', exc)}") from None
+            raise _unreachable(exc) from None
         with resp, tarfile.open(fileobj=resp, mode="r|gz") as tar:
             for m in tar:
                 rel = _safe_rel(m.name)

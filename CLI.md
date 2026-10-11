@@ -2,6 +2,9 @@
 
 [← back to the README](README.md)
 
+The `make` commands here need make, so Linux and macOS only. On Windows, use
+the page start.bat opens.
+
 ## The keyboard list
 
 The sidebar has two groups.

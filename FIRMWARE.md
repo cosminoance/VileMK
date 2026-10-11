@@ -184,7 +184,9 @@ The Flash sheet lists the variant's firmware files and walks you through it:
 1. Connect the keyboard (on a split keyboard, one half) with a USB data
    cable. Firmware cannot be copied over Bluetooth.
 2. Put it in its bootloader: on most boards, press its reset button twice
-   quickly. It shows up as a small USB drive, and the sheet finds it.
+   quickly. It shows up as a small USB drive, and the sheet finds it within 30
+   seconds. On Linux without automount, the sheet shows the command that
+   mounts the drive.
 3. Click **Copy** beside the file for that half. The sheet waits until the
    drive disappears and says **Flashed**.
 4. On a split keyboard, do the same with the other half and its own file
@@ -197,8 +199,8 @@ When the copy finishes and the drive disappears, the sheet confirms it:
 <img src=".github/images/flash-done.png" width="420" alt="The Flashed dialog: the left half's .uf2 is on the keyboard, disconnect the cable and flash the other half the same way, with OK">
 
 If the sheet says **Keyboard not found**, the keyboard is not in its
-bootloader yet. Press reset twice quickly again, or press the half's
-`&bootloader` key if the keymap has one, then click **Look again**.
+bootloader yet. Click **Look again**, then press reset twice quickly (or press
+the half's `&bootloader` key if the keymap has one).
 
 <img src=".github/images/flash-not-found.png" width="420" alt="The Keyboard not found dialog: no keyboard in its bootloader showed up over USB, with Cancel and Look again">
 
@@ -301,6 +303,8 @@ overwritten. What it writes is a new variant, and it runs the same checks
 
 **Export as picture**, in the same menu, has **Copy image**, **Save PNG** and
 **Save SVG**, for pasting a layout into a chat.
+
+![Export as picture example](images/export-as-picture.png)
 
 ## Building firmware in detail
 

@@ -13,6 +13,7 @@ pressed first. Changes stay pending on the keyboard until `save`.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 import time
@@ -182,12 +183,46 @@ LAYER_PROPS_ERRORS = {1: "generic error", 2: "invalid layer id"}
 MOVE_LAYER_ERRORS = {1: "generic error", 2: "invalid layer", 3: "invalid destination"}
 
 
+def _access(port: str, err) -> dict | None:
+    """-> {group, cmd} when Linux refused `port` for permissions, else None.
+
+    `group` owns the device node; `cmd` is the usermod line, or "" when the user is
+    already a member and only this session predates it. All readable without sudo.
+    """
+    if not sys.platform.startswith("linux") or "permission denied" not in str(err).lower():
+        return None
+    try:
+        import grp
+        import pwd
+        gid = os.stat(port).st_gid
+        group = grp.getgrgid(gid).gr_name
+        user = pwd.getpwuid(os.getuid()).pw_name
+        member = user in grp.getgrgid(gid).gr_mem and gid not in os.getgroups()
+    except (ImportError, OSError, KeyError):
+        group, member = "", False
+    if group in ("", "root"):
+        group = "uucp" if os.path.exists("/etc/arch-release") else "dialout"
+        member = False
+    return {"group": group, "cmd": "" if member else f"sudo usermod -aG {group} $USER"}
+
+
+def _access_hint(access: dict) -> str:
+    if not access["cmd"]:
+        return (f". You are in the {access['group']} group, but this session started "
+                f"before you were added: log out and back in, then Look again")
+    return (f". Your user is not allowed to open it: run `{access['cmd']}`, "
+            f"log out and back in, then Look again")
+
+
 class Client:
     def __init__(self, port: str, timeout: float = TIMEOUT):
         try:
             self.ser = serial.Serial(port, timeout=0.1, exclusive=True)
         except serial.SerialException as e:
-            raise StudioError(f"{port}: {e}") from e
+            access = _access(port, e)
+            err = StudioError(f"{port}: {e}{_access_hint(access) if access else ''}")
+            err.access = access
+            raise err from e
         self.port = port
         self.timeout = timeout
         self.next_id = 1
@@ -401,8 +436,10 @@ class Session:
                 try:
                     with Client(port, 0.5) as c:
                         out.append({"port": port, **c.device_info()})
-                except StudioError:
-                    continue
+                except StudioError as e:
+                    # a port this user may not open is listed with the fix
+                    if getattr(e, "access", None):
+                        out.append({"port": port, "refused": e.access})
             return out
 
     def connect(self, port: str | None) -> dict:

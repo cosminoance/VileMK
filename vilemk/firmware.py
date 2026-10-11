@@ -95,35 +95,69 @@ class FolderNeeded(BuildError):
 
 # ------------------------------------------------------------------ docker
 
+def _docker_fix(problem: str) -> dict:
+    """What to do about `problem` on this OS: `fix` in words, `cmds` to run."""
+    linux = sys.platform.startswith("linux")
+    if problem == "missing":
+        if not linux:
+            return {"fix": "install Docker Desktop from "
+                           "https://www.docker.com/products/docker-desktop/", "cmds": []}
+        for tool, cmd in (("pacman", "sudo pacman -S docker"),
+                          ("apt-get", "sudo apt install docker.io"),
+                          ("dnf", "sudo dnf install docker")):
+            if shutil.which(tool):
+                return {"fix": "run", "cmds": [cmd]}
+        return {"fix": "install Docker Engine from your distribution's packages or "
+                       "https://docs.docker.com/engine/install/", "cmds": []}
+    if problem == "group":
+        return {"fix": "add your user to the docker group, then log out and back in",
+                "cmds": ["sudo usermod -aG docker $USER"]}
+    if problem == "stopped":
+        return ({"fix": "start the Docker service", "cmds": ["sudo systemctl enable --now docker"]}
+                if linux else {"fix": "open the Docker Desktop app and wait until it "
+                                      "says it is running", "cmds": []})
+    return {"fix": "", "cmds": []}
+
+
+def docker_message(status: dict) -> str:
+    """`reason`, `fix` and `cmds` as one line for a terminal."""
+    out = status["reason"]
+    if status.get("fix"):
+        out += f"; {status['fix']}"
+    if status.get("cmds"):
+        out += ": " + " && ".join(status["cmds"])
+    return out
+
+
 def docker_status() -> dict:
-    """-> {ok, reason, mapped}. `reason` says what to fix when `ok` is false.
+    """-> {ok, reason, fix, cmds, mapped}. `reason` says what is wrong when `ok`
+    is false, `fix` and `cmds` what to do about it on this OS.
 
     `mapped` is true when the daemon already gives bind-mounted files to the
     host user: rootless Docker, and Docker Desktop (every Mac and Windows
     install), whose file sharing does the mapping.
     """
+    def bad(reason, problem=""):
+        return {"ok": False, "reason": reason, "mapped": False, **_docker_fix(problem)}
     if not shutil.which("docker"):
-        return {"ok": False, "reason": "Docker is not installed", "mapped": False}
+        return bad("Docker is not installed", "missing")
     try:
         r = subprocess.run(["docker", "info", "--format",
                             "{{json .SecurityOptions}} {{.OperatingSystem}}"],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=15)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"ok": False, "reason": f"`docker info` failed: {exc}", "mapped": False}
+        return bad(f"`docker info` failed: {exc}")
     if r.returncode == 0:
-        return {"ok": True, "reason": "",
+        return {"ok": True, "reason": "", "fix": "", "cmds": [],
                 "mapped": "rootless" in r.stdout or "Docker Desktop" in r.stdout}
     err = (r.stderr or r.stdout).strip()
     low = err.lower()
     if "permission denied" in low:
-        reason = ("your user cannot reach the Docker daemon; add it to the `docker` "
-                  "group and log in again")
-    elif "cannot connect" in low or "is the docker daemon running" in low:
-        reason = "the Docker daemon is not running"
-    else:
-        reason = err.splitlines()[-1] if err else f"`docker info` exited {r.returncode}"
-    return {"ok": False, "reason": reason, "mapped": False}
+        return bad("your user cannot reach the Docker daemon", "group")
+    if "cannot connect" in low or "is the docker daemon running" in low:
+        return bad("the Docker daemon is not running", "stopped")
+    return bad(err.splitlines()[-1] if err else f"`docker info` exited {r.returncode}")
 
 
 def _container_running() -> bool:
@@ -518,7 +552,7 @@ def stage(name: str, prep=(), zmk_dir: str = workspace.ZMK_DIR, slots=None) -> s
     the slot map goes to `out/` to be published with the firmware.
     """
     if not os.path.isfile(WEST_YML):
-        raise BuildError(f"there is no {WEST_YML}; run `make zmk` first")
+        raise BuildError(f"there is no {WEST_YML}; start the app once, or run `make zmk`")
     root = os.path.join(STAGE_DIR, name)
     shutil.rmtree(root, ignore_errors=True)
     shutil.copytree("config", os.path.join(root, "config"))
@@ -719,7 +753,7 @@ class Job:
                 raise Busy(f"a build of {self.variant} is running")
         status = docker_status()
         if not status["ok"]:
-            raise BuildError(status["reason"])
+            raise BuildError(docker_message(status))
         if _container_running():
             raise Busy(f"a {CONTAINER} container is already running, probably "
                        f"from another VileMK; stop it with `docker kill {CONTAINER}`")

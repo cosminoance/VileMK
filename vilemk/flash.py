@@ -3,15 +3,19 @@
 A board in its bootloader (double-tap reset on a nice!nano) shows up as a small
 USB drive with `INFO_UF2.TXT` at its root. Copying a `.uf2` onto it flashes the
 board, which then reboots and the drive goes away. This finds such drives among
-what the OS has already mounted; it never mounts anything itself.
+what the OS has already mounted; it never mounts anything itself. On Linux it
+also lists removable FAT drives nobody mounted, with the command to mount one.
 """
 
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
+import shutil
 import string
+import subprocess
 import sys
 
 from . import firmware
@@ -63,6 +67,32 @@ def drives() -> list:
         info = os.path.join(m, INFO)
         if os.path.isfile(info):
             out.append({"path": m, "board": _board(info)})
+    return out
+
+
+def unmounted() -> list:
+    """-> [{dev, label, cmd}] for removable FAT drives with no mount, Linux only.
+
+    A bootloader drive cannot be told from a USB stick before it is mounted, so
+    every one is listed. `cmd` mounts it writable for this user.
+    """
+    if not sys.platform.startswith("linux") or not shutil.which("lsblk"):
+        return []
+    try:
+        r = subprocess.run(["lsblk", "-J", "-o", "PATH,LABEL,FSTYPE,MOUNTPOINT,RM,HOTPLUG"],
+                           capture_output=True, text=True, timeout=5)
+        devs = json.loads(r.stdout).get("blockdevices") or []
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return []
+    out = []
+    for d in devs:
+        if (d.get("fstype") in LINUX_FS and not d.get("mountpoint")
+                and (d.get("rm") or d.get("hotplug"))):
+            dev = d.get("path") or ""
+            cmd = (f"udisksctl mount -b {dev}" if shutil.which("udisksctl") else
+                   f"sudo mkdir -p /mnt/uf2 && sudo mount -o uid=$(id -u),gid=$(id -g) "
+                   f"{dev} /mnt/uf2")
+            out.append({"dev": dev, "label": d.get("label") or "", "cmd": cmd})
     return out
 
 

@@ -14,10 +14,11 @@ import { Modal } from "./Modal";
 import { resetKeyboard } from "./Studio";
 
 const POLL_MS = 1000;
-const LOOK_MS = 10000;
+const LOOK_MS = 30000;
 const STUCK_MS = 15000;
 
 type Drive = { path: string; board: string };
+type Unmounted = { dev: string; label: string; cmd: string };
 
 /** settings_reset files first: they go on before the firmware. */
 const order = (files: string[]) => [
@@ -74,13 +75,18 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
 
   const q = `/api/flash?variant=${encodeURIComponent(name)}`;
 
+  const before = useRef<Set<string> | null>(null);
   const look = () => {
     setDrive(null);
     setMany([]);
     setFlashed(null);
     until.current = Date.now() + LOOK_MS;
     setLeft(LOOK_MS / 1000);
-    setLooking(true);
+    // Unmounted drives already there (a USB stick) are never the keyboard.
+    before.current = null;
+    api("GET", q).then((r) => { before.current = new Set((r.unmounted || []).map((u: Unmounted) => u.dev)); })
+      .catch(() => { before.current = new Set(); })
+      .finally(() => setLooking(true));
   };
 
   useEffect(() => { studioHolds(s.data, name).then(setHeld).catch(() => {}); }, []);
@@ -101,9 +107,24 @@ export function FlashSheet({ name, close }: { name: string; close: () => void })
     if (!looking) return;
     const t = setInterval(async () => {
       let found: Drive[] = [];
-      try { found = (await api("GET", q)).drives; }
+      let loose: Unmounted[] = [];
+      try { ({ drives: found, unmounted: loose = [] } = await api("GET", q)); }
       catch (e: any) { setErr(e.message); }
       if (!alive.current) return;
+      // Linux without automount: the drive is there, only the user can mount it.
+      loose = loose.filter((u) => !before.current?.has(u.dev));
+      if (!found.length && loose.length) {
+        setLooking(false);
+        const again = await ask({
+          title: "Drive not mounted", ok: "Look again",
+          body: <>A USB drive is plugged in but not mounted, so the keyboard cannot be
+            flashed yet. Run this in a terminal, then press Look again:
+            {loose.map((u) => <div key={u.dev}>
+              <b>{u.label || u.dev}</b> ({u.dev})
+              <code className="cmd">{u.cmd}</code></div>)}</> });
+        if (again && alive.current) look();
+        return;
+      }
       // Both halves report the same Board-ID, so with two drives there is no
       // telling which is which. Wait, without a time limit, for one to go.
       setMany(found.length > 1 ? found : []);
