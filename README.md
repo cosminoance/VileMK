@@ -40,6 +40,8 @@ VileMK is vile, as in ruthless.
 - [Troubleshooting](TROUBLESHOOTING.md)
 - [Command line and keyboard list details](CLI.md)
 
+Video walkthroughs: [VileMK on YouTube](https://www.youtube.com/watch?v=_VQ6LLUHb3U&list=PLAOzGtpkRAZg)
+
 <details>
 <summary>VileMK compared with ZMK Studio</summary>
 
