@@ -97,6 +97,14 @@ def scoped_on(rec: dict, scope: str) -> bool:
     return bool(scope) and bool((rec.get("scopes") or {}).get(scope))
 
 
+def scoped_reserved(rec: dict, scope: str) -> bool:
+    """A combo that is off for `scope` but kept in its vile slots builds with
+    `&none` in its slot, so Studio can switch it on. `reserves` is a map like
+    `scopes`."""
+    return (bool(scope) and not scoped_on(rec, scope)
+            and bool((rec.get("reserves") or {}).get(scope)))
+
+
 def path_for(kind: str, name: str) -> str:
     return os.path.join(DIRS[kind], f"{slug(name)}.json")
 
@@ -614,13 +622,16 @@ def emit_layer(rec: dict):
 
 def portable(rec: dict) -> dict:
     """A record without the fields that only mean something on this machine."""
-    return {k: v for k, v in rec.items() if k not in ("kind", "scopes", "broken")}
+    return {k: v for k, v in rec.items()
+            if k not in ("kind", "scopes", "reserves", "reserved", "broken")}
 
 
-def manifest(viledances=(), combos=(), layers=(), macros=()) -> str:
-    """The `// vilemk-records:` line for a block built from these records."""
+def manifest(viledances=(), combos=(), layers=(), macros=(), reserved=()) -> str:
+    """The `// vilemk-records:` line for a block built from these records.
+    `reserved` combos are listed with `"reserved": true` and emit nothing."""
     payload = {"viledance": [portable(r) for r in viledances],
-               "combo": [portable(r) for r in combos],
+               "combo": [portable(r) for r in combos]
+                        + [{**portable(r), "reserved": True} for r in reserved],
                "layer": [portable(r) for r in layers],
                "macro": [portable(r) for r in macros]}
     return RECORDS_MARK + json.dumps(payload, separators=(",", ":"), sort_keys=True)
@@ -699,8 +710,9 @@ def rename_in_record(rec: dict, kind: str, target: str, old: str, new: str) -> d
     return out
 
 
-def block(viledances=(), combos=(), layers=(), macros=()) -> str:
-    """The whole generated root block: only what was passed in."""
+def block(viledances=(), combos=(), layers=(), macros=(), reserved=()) -> str:
+    """The whole generated root block: only what was passed in. `reserved` combos
+    go in the manifest only (`manifest()`)."""
     behaviors, errors = "", []
     for rec in viledances:
         try:
@@ -734,9 +746,9 @@ def block(viledances=(), combos=(), layers=(), macros=()) -> str:
                 behaviors += nodes
         except EmitError as exc:
             errors.append(f"{rec.get('name')}: {exc}")
-    if not behaviors and not macro_nodes and not combo_nodes and not cond_nodes:
+    if not (behaviors or macro_nodes or combo_nodes or cond_nodes or reserved):
         return "", errors
-    out = [BEGIN_MARK, manifest(viledances, combos, layers, macros), "/ {"]
+    out = [BEGIN_MARK, manifest(viledances, combos, layers, macros, reserved), "/ {"]
     if behaviors:
         out.append("    behaviors {\n" + behaviors + "    };")
     if macro_nodes:
@@ -1368,7 +1380,8 @@ def build_variant(base_text, expanded_layers, assignments, viledances, combos,
     wanted, live_combos, live_layers, live_macros = reachable_records(
         text, viledances, combos, layers, macros, scope)
 
-    gen, errors = block(wanted, live_combos, live_layers, live_macros)
+    gen, errors = block(wanted, live_combos, live_layers, live_macros,
+                        [c for c in combos if scoped_reserved(c, scope)])
     errors = dropped + errors
     changed = [i for i in range(count) if (keep.index(i) if i in keep else None) != i]
     if changed:
@@ -1411,7 +1424,8 @@ def with_manifest(text, viledances, combos, layers, macros, scope=""):
     recs = reachable_records(strip_block(text), viledances, combos, layers,
                              macros, scope)
     at = text.find(BEGIN_MARK) + len(BEGIN_MARK)
-    return text[:at] + "\n" + manifest(*recs) + text[at:]
+    return (text[:at] + "\n"
+            + manifest(*recs, [c for c in combos if scoped_reserved(c, scope)]) + text[at:])
 
 
 # ------------------------------------------------------------- vile slots
@@ -1498,12 +1512,35 @@ def slot_keymap(text: str, s: dict, keys: int):
     """A variant keymap rewritten for a vile slots build -> (text, slot map, notes).
 
     Reads the records from the keymap's own manifest, so it needs nothing from
-    custom/. Records past a type's count stay compiled as they were.
+    custom/. Every combo gets a slot, reserved ones (`"reserved": true`) with
+    `&none`; the `combos` setting is ignored. When combos leave too little room,
+    the four-way count shrinks first, then the two-way one. Viledances past a
+    count stay compiled as they were.
     """
-    s = check_slots(s, keys)
+    s = check_slots(s)
     recs = read_manifest(text)
+    notes = []
+    combo_recs = []
+    for r in recs["combo"]:
+        if r.get("reserved") and any(int(p) >= keys for p in r.get("key_positions") or ()):
+            notes.append(f"reserved combo {r['name']} is left out: its keys are not on "
+                         f"this keyboard")
+        else:
+            combo_recs.append(r)
+    s["combos"] = len(combo_recs)
+    if s["combos"] > keys:
+        raise EmitError(f"{s['combos']} combos need more slots than the {keys} the "
+                        f"keyboard has")
+    for k, each in (("four", 4), ("two", 2)):
+        over = 4 * s["four"] + 2 * s["two"] + s["combos"] - keys
+        if over > 0 and s[k]:
+            cut = min(s[k], -(-over // each))
+            s[k] -= cut
+            notes.append(f"{cut} {k}-way viledance slot{'s' if cut > 1 else ''} "
+                         f"dropped to make room for the combos")
+    s = check_slots(s, keys)
     body = strip_block(text)
-    four, two, kept, notes = [], [], [], []
+    four, two, kept = [], [], []
     for r in recs["viledance"]:
         shape = vd_shape(r)
         room = s["four"] if shape == "four" else s["two"] if shape == "two" else 0
@@ -1515,9 +1552,7 @@ def slot_keymap(text: str, s: dict, keys: int):
                 notes.append(f"viledance {r['name']} is compiled: all {room} "
                              f"{shape}-way slots are taken")
             kept.append(r)
-    combos, combo_recs = [], recs["combo"][:s["combos"]]
-    for r in recs["combo"][len(combo_recs):]:
-        notes.append(f"combo {r['name']} is compiled: all {s['combos']} combo slots are taken")
+    combos = []
 
     subs = []
     for k, r in enumerate(four):
@@ -1562,10 +1597,10 @@ def slot_keymap(text: str, s: dict, keys: int):
     base1 = base2 + 2 * s["two"]
     cmap = []
     for i, r in enumerate(combo_recs):
-        stock[base1 + i] = row(r, "binding")
-        cmap.append({"name": r["name"], "slot": base1 + i})
+        stock[base1 + i] = "&none" if r.get("reserved") else row(r, "binding")
+        cmap.append({"name": r["name"], "slot": base1 + i,
+                     **({"reserved": True} if r.get("reserved") else {})})
         combos.append({**sub_rec(r, "combo"), "binding": f"&vslot {base1 + i}"})
-    combos += [sub_rec(r, "combo") for r in recs["combo"][len(combo_recs):]]
 
     body = _outside_comments(body, sub)
     layer = _layer_id_count(body)

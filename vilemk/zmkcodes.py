@@ -62,6 +62,11 @@ def commands(inc: Path) -> dict:
         for name, text in d.items():
             if name.endswith("_CMD") and text.isdigit():
                 short = name[:-4]
+                alias = next((k for k, v in d.items() if v == name), None)
+                if short not in d and alias:
+                    # ext_power.h names its commands EP_* and they take no argument.
+                    table[int(text)] = [alias, False]
+                    continue
                 takes = not (short in d and d[short].endswith(" 0"))
                 table[int(text)] = [short, takes]
         # outputs.h names its values directly.

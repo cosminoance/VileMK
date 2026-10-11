@@ -35,7 +35,7 @@ export function Menu({ layer }: { layer: any }) {
   // Studio cannot add combos or conditional layers, so their tabs are dimmed there,
   // except combos on a keyboard with vile slots.
   const board = PTABS.slice(PTABS.findIndex(([v]) => v === FIRST_BOARD_TAB)).map(([v]) => v);
-  const off = (v: string) => !!sp && board.includes(v) && !(v === "combo" && !sp.slotWhy("combo"));
+  const off = (v: string) => !!sp && board.includes(v) && !(v === "combo" && sp.slots);
   const ptab = t.exclude.includes(s.ptab as Mode) || off(s.ptab) ? "keyboard" : s.ptab;
   const field = sp && !panel ? KEY_FIELD : activeFieldOf(s);
   const label = menuFields(s).find((f) => f.key === field)?.label;

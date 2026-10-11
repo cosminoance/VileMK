@@ -5,7 +5,7 @@ import {
 } from "../lib/bindings";
 import { PICKER, PICKER_EXTRA, SYSTEM, type PickerEntry } from "../lib/keycodes";
 import { label } from "../lib/labels";
-import { byId, scopeOf, scopeOn } from "../lib/keymaps";
+import { byId, scopeOf, scopeOn, scopeReserved } from "../lib/keymaps";
 import { BLANK, isDirty, recordOf, type Mode } from "../lib/drafts";
 import {
   activeFieldOf, applyField, fieldValue, KEY_FIELD,
@@ -14,9 +14,10 @@ import { layerRows, layersOf, ltCode } from "../lib/layers";
 import {
   macroBinding, macroSummary, macroTitle, usesVd, vdTitle,
 } from "../lib/cards";
-import type { Slots } from "../lib/slots";
-import { previewBinding, toggleScope } from "../state/actions";
+import { vdKey, type Slots } from "../lib/slots";
+import { previewBinding, setComboState, toggleScope } from "../state/actions";
 import { draftOf, useStore } from "../state/store";
+import { Help } from "./Help";
 
 // --------------------------------------------------------------- studio mode
 /** Provided by Studio mode: picks go to the keyboard, and whatever its firmware
@@ -42,6 +43,15 @@ export interface StudioPick {
   saveRecord: (mode: Mode, draft: any) => void;
   /** The keyboard's slot timing, when it has vile slots. */
   slots: Slots | null;
+  /** The scope of the keymap the keyboard is matched to. */
+  scope: string;
+  /** Why a combo's switch cannot change it on the keyboard, or null. */
+  switchWhy: (name: string) => string | null;
+  /** False when the keyboard's slot map lacks this combo, so it was not built;
+   *  null when the keyboard has no slots to tell. */
+  built: (name: string) => boolean | null;
+  /** Writes a slot combo's output (on) or `&none` (off) and its flags. */
+  comboSwitch: (name: string, on: boolean) => void;
 }
 export const StudioPickCtx = createContext<StudioPick | null>(null);
 
@@ -231,7 +241,7 @@ export function ViledanceTab({ cur }: { cur: string }) {
       {items.map((t) => (
         <Card key={t.name} mode="viledance" name={t.name}
               sel={usesVd(cur, t.name)} title={vdTitle(t)}
-              main={"&" + t.name} bind={[`&vd_${t.name}`, `&ht_${t.name}`]}
+              main={"&" + t.name} bind={[`&vd_${t.name}`, vdKey(t)]}
               up={[t.tap, t.hold, t.double_tap, t.tap_hold].filter(Boolean).join("  /  ")}
               onClick={async () => {
                 const b = await previewBinding(d, "viledance", t);
@@ -385,25 +395,58 @@ export function LayerTab({ cur }: { cur: string }) {
 // Neither a combo nor a conditional layer goes on a key, so neither tab fills
 // anything: a row is a switch plus a way into its record. `enabled` is exactly
 // what `build_variant()` already reads - on means it is written into the next
-// variant, off means it is left out.
+// variant, off means it is left out. A combo has a third state, reserved: off,
+// but built into vile slots with `&none` so Studio can switch it on.
+const STATES = ["off", "reserved", "on"] as const;
+const STATE_TIP = {
+  on: "built, active",
+  reserved: "built with &none, keys pressed together do nothing",
+  off: "not built",
+};
+const STATE_NAME = { on: "On", reserved: "Reserved", off: "Off" };
+
 function BRow({ mode, r, sub, scope }:
     { mode: Mode; r: any; sub: string; scope: string }) {
   const { s, d } = useStore();
   const sp = useContext(StudioPickCtx);
   const why = sp?.slotWhy(mode, r.name);
   const on = scopeOn(r, scope);
+  const state = on ? "on" : mode === "combo" && scopeReserved(r, scope) ? "reserved" : "off";
+  const unbuilt = !!sp && mode === "combo" && sp.built(r.name) === false;
   const open = s.emode === mode && (draftOf(s, mode).name || "") === r.name;
   const elsewhere = Object.keys(r.scopes || {})
     .filter((k) => r.scopes[k] && k !== scope);
+  const swWhy = !sp ? null : mode === "combo" ? sp.switchWhy(r.name) : BUILD_TIP;
+  const also = elsewhere.length ? "\n\nalso on for: " + elsewhere.join(", ") : "";
+  // Studio cannot build, so Off (left out of the build) is never a choice there.
+  const pickWhy = (to: typeof STATES[number]) =>
+    swWhy || (sp && to === "off" ? "Off needs a build: set it in Firmware mode" : null);
+  const pick = (to: typeof STATES[number]) => to !== state && (sp
+    ? sp.comboSwitch(r.name, to === "on") : setComboState(s, d, r.name, to));
   return (
     <div className={"brow" + (on ? "" : " off") + (open ? " sel" : "")}>
-      <button type="button" className={"tgl " + (on ? "on" : "off")} disabled={!!sp}
-              title={sp ? BUILD_TIP : (on ? "written into this keymap's variant"
-                         : "left out of this keymap's variant")
-                     + (elsewhere.length ? "\n\nalso on for: " + elsewhere.join(", ") : "")}
-              onClick={() => toggleScope(s, d, mode, r.name)}>
-        {on ? "On" : "Off"}
-      </button>
+      {mode !== "combo"
+        ? <button type="button" className={"tgl " + state} disabled={!!swWhy}
+                  title={swWhy || (on ? "written into this keymap's variant"
+                                      : "left out of this keymap's variant") + also}
+                  onClick={() => toggleScope(s, d, mode, r.name)}>
+            {on ? "On" : "Off"}
+          </button>
+        : unbuilt
+          ? <button type="button" className="tgl off" disabled title={swWhy || undefined}>
+              Not built</button>
+          : <span className="seg" role="radiogroup" aria-label={`${r.name} state`}>
+              {STATES.map((to) => (
+                <button key={to} type="button" role="radio" aria-checked={to === state}
+                        className={to + (to === state ? " cur"
+                          : to === "reserved" && state === "on" ? " incl" : "")}
+                        disabled={to !== state && !!pickWhy(to)}
+                        title={(to !== state && pickWhy(to)) || STATE_TIP[to] + also}
+                        onClick={() => pick(to)}>
+                  {STATE_NAME[to]}
+                </button>
+              ))}
+            </span>}
       <button type="button" className="bopen" disabled={!!why} title={why || undefined}
               onClick={() => d({ t: "openPanel", mode,
                                  draft: JSON.parse(JSON.stringify(r)) })}>
@@ -423,12 +466,8 @@ function ScopeNote() {
   if (!km) return <div className="hint">Pick a keyboard on the left first.</div>;
   return (
     <div className="hint">
-      These switches are <b>for {km.name}</b> only
-      {km.kind === "variant"
-        ? <> – each saved variant keeps its own set.</>
-        : <> – <code>{km.kind}</code> keymaps are never written to, so what is On
-            here is what goes into the next variant you save from it, and stays
-            On for that variant afterwards.</>}
+      For <b>{km.name}</b> only.
+      {km.kind !== "variant" && <> Applies to the next variant saved from it.</>}
     </div>
   );
 }
@@ -436,7 +475,8 @@ function ScopeNote() {
 function BoardList({ mode, items, sub, label: lbl }:
     { mode: Mode; items: any[]; sub: (r: any) => string; label: string }) {
   const { s } = useStore();
-  const scope = scopeOf(byId(s.data.keymaps, s.id));
+  const sp = useContext(StudioPickCtx);
+  const scope = sp ? sp.scope : scopeOf(byId(s.data.keymaps, s.id));
   return <>
     {items.length
       ? <div className="blist">
@@ -449,28 +489,34 @@ function BoardList({ mode, items, sub, label: lbl }:
   </>;
 }
 
+/** What On, Reserved and Off do for a vile slots build. */
+export function ReservedHelp() {
+  return (
+    <Help label="combo states">
+      <b>On</b>: built and active.<br />
+      <b>Reserved</b>: built with &amp;none. Its keys pressed together do nothing.
+      Needs vile slots, otherwise same as Off.<br />
+      <b>Off</b>: not built.<br /><br />
+      Studio can switch On and Reserved and change an On combo's output. New combos,
+      keys, timeout and layers need a build.
+    </Help>
+  );
+}
+
 export function ComboTab() {
   const { s } = useStore();
   const sp = useContext(StudioPickCtx);
+  const list = <BoardList mode="combo" items={s.store.combo || []} label="combo"
+    sub={(r) => `${(r.key_positions || []).join(" + ")} → ${r.binding || "?"}`} />;
   if (sp) return <>
-    <div className="hint">
-      A combo whose output sits in a vile slot can have its output changed here, straight
-      on the keyboard. Its keys, timeout and layers are part of the build. Combos that are
-      not in slots are dimmed.
-    </div>
-    <BoardList mode="combo" items={s.store.combo || []} label="combo"
-               sub={(r) => `${(r.key_positions || []).join(" + ")} → ${r.binding || "?"}`} />
+    <div className="hint">Combos in vile slots switch here with no build. <ReservedHelp /></div>
+    {list}
   </>;
   return <>
-    <div className="hint">
-      A combo is <b>board-wide</b>: press two or more keys together, anywhere. It
-      sits on no key of its own, so there is nothing to pick here - switch one{" "}
-      <b>On</b> and it goes into this keymap's variant, <b>Off</b> and it is left
-      out. Click a row to edit it; the board above is where its chord is chosen.
-    </div>
+    <div className="hint">Keys pressed together. Click a row to edit, pick its keys on
+      the board. <ReservedHelp /></div>
     <ScopeNote />
-    <BoardList mode="combo" items={s.store.combo || []} label="combo"
-               sub={(r) => `${(r.key_positions || []).join(" + ")} → ${r.binding || "?"}`} />
+    {list}
   </>;
 }
 

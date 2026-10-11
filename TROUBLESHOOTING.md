@@ -1,6 +1,75 @@
-# Troubleshooting keyboard modules
+# Troubleshooting
 
-[← back to the README](README.md#keyboard-modules)
+[← back to the README](README.md)
+
+- [Flashing](#flashing)
+- [Studio mode](#studio-mode)
+- [Keyboard modules](#keyboard-modules)
+  - [What a module needs](#what-a-module-needs)
+  - [Repositories VileMK prepares](#repositories-vilemk-prepares)
+  - [Errors and what they mean](#errors-and-what-they-mean)
+  - [Drivers and other dependencies](#drivers-and-other-dependencies)
+  - [Example: Charybdis](#example-charybdis)
+
+## Flashing
+
+### The Flash sheet says "Keyboard not found"
+
+The keyboard is not in its bootloader, or the cable carries no data. Press
+the reset button twice quickly (some boards have a different key or a button
+underneath; check the maker's guide), then **Look again**. If no USB drive
+appears on the computer at all, try another cable: charge-only cables are
+common.
+
+### The drive stays after Copy
+
+The board did not take the file. Check that the file is the one for that half
+(`…_left…` for the left) and copy again.
+
+### The keyboard runs the new keymap except for a few keys
+
+Keys saved from ZMK Studio override the flashed keymap. Clear them with
+**Reset to flashed firmware** in Studio mode, or flash the settings reset
+file; see the warning in [Firmware mode, step 6](FIRMWARE.md#6-flash).
+
+### A half stops pairing after the settings reset
+
+The settings reset clears Bluetooth pairings on that half. Flash both halves
+with the reset and then the firmware, and pair the keyboard with the computer
+again.
+
+## Studio mode
+
+### No keyboard is listed
+
+- The firmware was built without ZMK Studio. The variant needs a
+  `&studio_unlock` key before the build; see
+  [Firmware mode, step 4](FIRMWARE.md#4-optional-prepare-for-studio-mode).
+- The wrong half is plugged in. Studio is on the left half (or the dongle),
+  over USB only, not Bluetooth.
+- Another program holds the port, such as the official ZMK Studio app or a
+  serial monitor. Close it and **Look again**.
+- On Linux, your user may not be allowed to open serial ports. Add yourself
+  to the group that owns `/dev/ttyACM*` (`dialout` on Debian and Ubuntu,
+  `uucp` on Arch), log out and in again, then **Look again**.
+
+### The page says the keyboard is locked
+
+Press the `&studio_unlock` key on the keyboard. The page notices on its own.
+
+### "Save as variant…" is greyed out
+
+Hover over it for the reason. "Save to keyboard first" means the keyboard
+holds unsaved changes. A different number of layers, or a behavior the keymap
+file does not define, means the keymap picked for the keyboard is not the one
+it was flashed with: pick the right one in the **keymap** select.
+
+### "all four-way vile slots are in use" (or two-way)
+
+Every slot of that kind holds a VileDance. Unbind one in Studio, or build again
+with more of that kind in **Edit slots…**.
+
+## Keyboard modules
 
 VileMK builds a keyboard from a module the same way ZMK does: west fetches the
 module from GitHub and Zephyr looks for the keyboard's files in the places a
@@ -10,13 +79,7 @@ VileMK does not run that CI. It recognises the common steps and builds from a
 prepared copy of the repository instead, asking you where the repository offers
 more than one way to build. What it cannot repeat is listed below.
 
-- [What a module needs](#what-a-module-needs)
-- [Repositories VileMK prepares](#repositories-vilemk-prepares)
-- [Errors and what they mean](#errors-and-what-they-mean)
-- [Drivers and other dependencies](#drivers-and-other-dependencies)
-- [Example: Charybdis](#example-charybdis)
-
-## What a module needs
+### What a module needs
 
 A module that works in ZMK's own build, and in VileMK without any preparing,
 looks like this:
@@ -56,7 +119,7 @@ What each part is for:
   file, and two folders with `charybdis_left.overlay` make the build fail.
 - **Every file an overlay includes is in that folder.**
 
-## Repositories VileMK prepares
+### Repositories VileMK prepares
 
 When a module breaks one of those rules in a way VileMK recognises, the build
 uses a copy of it under `.zmk/stage/` with the problem fixed. The fetched
@@ -93,23 +156,23 @@ What VileMK does not repeat:
   look for the keyboard maker's own module, often named `zmk-<keyboard>` or
   `zmk-keyboard-<keyboard>`, or fork the repository into the layout above.
 
-## Errors and what they mean
+### Errors and what they mean
 
-### "it has no keyboard VileMK can add"
+#### "it has no keyboard VileMK can add"
 
 The message after fetching a module. The module was fetched, but it has no
 shield folder under `boards/shields/` (or `config/boards/shields/`), and no
 board with a `*.zmk.yml` and a default `.keymap`. Driver modules, such as a
 trackball driver, look like this and are fine to keep: the build uses them.
 
-### "Build entries from the vendor's own firmware"
+#### "Build entries from the vendor's own firmware"
 
 A dialog after saving a variation, for a keyboard that is not prepared. The
 vendor's `build.yaml` names every entry after one of its own firmware files.
 VileMK took one entry per board and shield from it. Check the boards and
 shields in the variation's `build.yaml`.
 
-### "... is not installed"
+#### "... is not installed"
 
 No installed module has a board or shield by that name. Either the module is
 missing, or the variation's `build.yaml` names the keyboard wrongly. If it
@@ -119,7 +182,7 @@ hand.
 
 <img src=".github/images/trouble-not-installed.png" width="560" alt="The build sheet refusing a variation whose build.yaml guessed board: charybdis, with the Board not installed dialog">
 
-### "... lists its keys in a different order than its wiring"
+#### "... lists its keys in a different order than its wiring"
 
 A warning under the layout menu, with the menu outlined. The keyboard's
 physical layout file (the picture VileMK and ZMK Studio draw) lists its keys
@@ -138,18 +201,18 @@ module is changed. ZMK Studio still draws the file's order.
 
 <img src=".github/images/trouble-layout-order.png" width="800" alt="A Charybdis keymap with the layout menu set to Charybdis 5x6 (wiring order) and an orange warning explaining that the layout file lists its keys in a different order than the matrix transform">
 
-### "Pick the shield folder"
+#### "Pick the shield folder"
 
 The module keeps this keyboard in more than one folder and the variation has
 none picked. Pick one in the Build panel's **folder** select.
 
-### "Zephyr would find a shield twice"
+#### "Zephyr would find a shield twice"
 
 Two installed modules define the same shield, for example two Charybdis
 repositories. Remove all but one of them in Add a keyboard. (Two folders in
 one module are the **folder** select above, not this error.)
 
-### `Invalid SHIELD` in the build log
+#### `Invalid SHIELD` in the build log
 
 Zephyr did not find the shield. VileMK prepares repositories without
 `zephyr/module.yml` or with shields under `config/boards/shields/`, so this
@@ -159,18 +222,18 @@ layout against the one above.
 
 <img src=".github/images/trouble-invalid-shield.png" width="560" alt="A build log ending in Invalid SHIELD for charybdis_left, after the list of every shield Zephyr knows">
 
-### `No such file or directory` on an `#include` in the build log
+#### `No such file or directory` on an `#include` in the build log
 
 An overlay or `.dtsi` includes a file that is neither in its folder nor in
 the repository's `config/`, usually one the vendor's CI downloads or
 generates. Move the file into the shield folder in a fork.
 
-### Unknown `compatible` or undefined Kconfig symbol in the build log
+#### Unknown `compatible` or undefined Kconfig symbol in the build log
 
 The keyboard needs a driver that is not installed, or one at a branch written
 for another ZMK version. See the next section.
 
-## Drivers and other dependencies
+### Drivers and other dependencies
 
 A keyboard with a trackball, trackpad, encoder driver or display often needs
 extra modules. A config repository lists them in its `config/west.yml`. After
@@ -194,7 +257,7 @@ A trackball keyboard that uses a PMW3610 sensor, for example, needs
 `badjeff/zmk-pmw3610-driver` or another PMW3610 driver. Build log lines naming
 `pixart,pmw3610` or `CONFIG_PMW3610` point to it.
 
-## Example: Charybdis
+### Example: Charybdis
 
 Two Charybdis repositories show what preparing covers.
 

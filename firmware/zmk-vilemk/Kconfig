@@ -2,3 +2,5 @@ config ZMK_BEHAVIOR_VILE_SLOT
     bool
     default y
     depends on DT_HAS_ZMK_BEHAVIOR_VILE_SLOT_ENABLED
+    # Reads the keymap, which split peripherals do not build.
+    depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL

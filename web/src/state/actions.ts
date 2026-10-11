@@ -18,11 +18,16 @@ const bad = (e: unknown) => ({ text: (e as Error).message, bad: true });
 // A brand-new board-wide record is switched on for the keymap it was designed
 // against and nowhere else - that is the "off unless you say so" rule, minus
 // the pointless step of switching on the one you are obviously making it for.
-// An existing record's scopes are left exactly as they are.
+// An existing record keeps the scopes and reserves it has on disk, since the
+// switch may have changed them while the draft was open.
 export async function saveItem(s: State, d: D, mode: Mode, draft: any): Promise<boolean> {
   const kind = KIND_OF[mode];
+  const old = recordOf(s.store, mode, draft.name);
   let body = { ...draft, kind };
-  if (BOARD_TABS.includes(mode) && !recordOf(s.store, mode, draft.name)) {
+  if (old && BOARD_TABS.includes(mode))
+    body = { ...body, scopes: old.scopes || {},
+             ...(old.reserves ? { reserves: old.reserves } : {}) };
+  if (BOARD_TABS.includes(mode) && !old) {
     const scope = scopeOf(byId(s.data.keymaps, s.id));
     if (scope) body = { ...body, scopes: { ...(draft.scopes || {}), [scope]: true } };
   }
@@ -68,6 +73,29 @@ export async function toggleScope(s: State, d: D, mode: Mode, name: string) {
     d({ t: "store", store: r.custom });
     d({ t: "msg", msg: { text: `${rec.name} is now ${now ? "on" : "off"} for ${scope}` } });
   } catch (e) { d({ t: "msg", msg: bad(e) }); }
+}
+
+export type ComboState = "on" | "reserved" | "off";
+
+// A combo's three states for one keymap: `scopes` says on, `reserves` says
+// built into vile slots with `&none`. `scope` defaults to the selected keymap's.
+export async function setComboState(s: State, d: D, name: string, state: ComboState,
+                                    scope = scopeOf(byId(s.data.keymaps, s.id))) {
+  const rec = recordOf(s.store, "combo", name);
+  if (!rec) return false;
+  if (!scope) {
+    d({ t: "msg", msg: { text: "pick a keyboard first", bad: true } });
+    return false;
+  }
+  try {
+    const r = await api("POST", "/api/combo", {
+      ...rec, kind: "combo",
+      scopes: { ...(rec.scopes || {}), [scope]: state === "on" },
+      reserves: { ...(rec.reserves || {}), [scope]: state === "reserved" } });
+    d({ t: "store", store: r.custom });
+    d({ t: "msg", msg: { text: `${rec.name} is now ${state} for ${scope}` } });
+    return true;
+  } catch (e) { d({ t: "msg", msg: bad(e) }); return false; }
 }
 
 // A card on the VileDance, Modifiers or Layers tab is not a finished binding

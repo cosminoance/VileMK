@@ -962,6 +962,7 @@ def _incoming(text: str):
             else:
                 status = "clash"
             rows.append({"kind": kind, "name": name, "status": status,
+                         "reserved": bool(rec.get("reserved")),
                          "incoming": custom.portable(rec),
                          "local": custom.portable(cur) if cur else None})
     return rows
@@ -1000,7 +1001,7 @@ def _import_plan(rows, choices, renames):
             existing.add((kind, name))
             plan.append((kind, row["incoming"], ""))
         if _board_wide(kind, row["incoming"]):
-            scope_on.append((kind, final))
+            scope_on.append((kind, final, row.get("reserved", False)))
     return plan, scope_on, errors
 
 
@@ -1091,17 +1092,21 @@ def _scoped_records():
 
 
 def _carry_scope(src: str, dst: str) -> None:
-    """Copy every on/off flag from one scope key to another."""
+    """Copy every on/off and reserved flag from one scope key to another."""
     if not src or not dst or src == dst:
         return
     for kind, rec in _scoped_records():
-        scopes = rec.get("scopes") or {}
-        on = bool(scopes.get(src))
-        if bool(scopes.get(dst)) == on:
-            continue
-        scopes[dst] = on
-        rec["scopes"] = scopes
-        custom.save(kind, rec)
+        changed = False
+        for field in ("scopes", "reserves"):
+            flags = rec.get(field) or {}
+            on = bool(flags.get(src))
+            if bool(flags.get(dst)) == on:
+                continue
+            flags[dst] = on
+            rec[field] = flags
+            changed = True
+        if changed:
+            custom.save(kind, rec)
 
 
 def _scope_on(scope: str, wanted) -> None:
@@ -1110,24 +1115,29 @@ def _scope_on(scope: str, wanted) -> None:
     An imported file carries its combos and conditional layers in the manifest
     because they were written into it, so they belong to the variant being
     written here whether the record was restored, renamed or already local.
+    Combos listed as reserved are reserved instead.
     """
-    want = {(k, custom.slug(n)) for k, n in wanted}
+    want = {(k, custom.slug(n)): reserved for k, n, reserved in wanted}
     for kind, rec in _scoped_records():
-        if (kind, custom.slug(rec.get("name", ""))) not in want:
+        key = (kind, custom.slug(rec.get("name", "")))
+        if key not in want:
             continue
-        scopes = rec.get("scopes") or {}
-        if scopes.get(scope):
+        field = "reserves" if want[key] else "scopes"
+        flags = rec.get(field) or {}
+        if flags.get(scope):
             continue
-        scopes[scope] = True
-        rec["scopes"] = scopes
+        flags[scope] = True
+        rec[field] = flags
         custom.save(kind, rec)
 
 
 def _forget_scope(scope: str) -> None:
     """Drop a scope key everywhere - the file it named is gone."""
     for kind, rec in _scoped_records():
-        if scope in (rec.get("scopes") or {}):
-            del rec["scopes"][scope]
+        hit = [f for f in ("scopes", "reserves") if scope in (rec.get(f) or {})]
+        for f in hit:
+            del rec[f][scope]
+        if hit:
             custom.save(kind, rec)
 
 

@@ -1,10 +1,16 @@
 # The keymap tabs
 
-[← back to the README](README.md#behaviours-every-tab-in-the-app)
+[← back to Firmware mode](FIRMWARE.md#behaviours-every-tab-in-the-app)
 
 What each of the eight tabs under the board does and what its settings mean.
-How the tabs, key editor and creation panels work together is in the
-[README](README.md#behaviours-every-tab-in-the-app).
+How the tabs, key editor and creation panels work together is in
+[Firmware mode](FIRMWARE.md#behaviours-every-tab-in-the-app).
+
+In [Studio mode](STUDIO.md) the same tabs fill keys on the connected keyboard.
+**Combos** (unless the keyboard has vile slots) and **Conditional layers** are
+dimmed there. **+ New** and the edit pencils work only where the firmware
+can take the result, such as a VileDance on a keyboard with vile slots; when
+they are off, hover over them for the reason.
 
 - [Keyboard](#keyboard)
 - [Media & system](#media--system)
@@ -172,6 +178,12 @@ keymap, so the same combo can be on for one variant and off for another. A
 newly created one is switched on only for the keymap you designed it against;
 flip it on for others yourself.
 
+A combo's switch has a third state, **Reserved**: off, but built into the
+firmware when the variant uses vile slots, so Studio mode can switch it on later
+with no build. While a Reserved combo is off, pressing its keys together does
+nothing and the keys do not type. Without vile slots, Reserved is the same as
+Off. See [STUDIO.md](STUDIO.md#what-vile-slots-are-for).
+
 <img src=".github/images/tab-combos.png" width="380" alt="The Combo panel: a saved chord's Name, Keys, Output key, Timeout and Layers"> <img src=".github/images/tab-conditional-layers.png" width="380" alt="The Conditional layer panel: a saved tri-layer rule's Name, If layers and Then layer">
 
-[← back to the README](README.md#behaviours-every-tab-in-the-app)
+[← back to Firmware mode](FIRMWARE.md#behaviours-every-tab-in-the-app)

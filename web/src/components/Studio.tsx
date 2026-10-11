@@ -11,10 +11,12 @@ import {
 } from "../lib/slots";
 import { recordOf, type Mode } from "../lib/drafts";
 import { tabForBinding } from "../lib/cards";
-import { buildChoices, byId, choicesBody, slugify } from "../lib/keymaps";
+import {
+  buildChoices, byId, choicesBody, scopeOf, scopeOn, scopeReserved, slugify,
+} from "../lib/keymaps";
 import { label } from "../lib/labels";
 import { HEADS } from "../lib/zmkcodes";
-import { saveItem, saveVariant } from "../state/actions";
+import { saveItem, saveVariant, setComboState } from "../state/actions";
 import type { AppMode, Msg } from "../state/store";
 import { useStore } from "../state/store";
 import { Board } from "./Board";
@@ -104,9 +106,6 @@ function writeBlock(km: any, diff: FileDiff | null, unsaved: boolean, total: num
   if (km.layers.length !== total)
     return `${km.name} has ${km.layers.length} layers and the keyboard's firmware ${total}: `
       + "the file changed since it was flashed, or the keyboard runs another keymap";
-  if (km.firmware?.uf2 && !km.firmware.fresh)
-    return `${km.name} was saved after its last build, so the keyboard may run an older `
-      + "version of it; build and flash it first";
   if (diff.beyond.length)
     return `${km.name} has fewer layers than the keyboard: it is not the file this keyboard `
       + "was flashed with";
@@ -584,8 +583,51 @@ export function StudioView() {
     if (typeof sb === "string") return sb;
     if (mode === "viledance") return null;
     if (!name) return "a new combo needs a build: make it in Firmware mode";
-    return name in sb.combos ? null
-      : `${name} is not in a vile slot on this keyboard: changing it needs a build`;
+    if (!(name in sb.combos))
+      return `${name} is not in a vile slot on this keyboard: changing it needs a build`;
+    const r = recordOf(s.store, "combo", name);
+    return r && !scopeOn(r, scope) ? "switch it On to change its output" : null;
+  };
+  const scope = scopeOf(matched);
+  const switchWhy = (name: string) => {
+    if (typeof sb === "string") return sb;
+    const r = recordOf(s.store, "combo", name);
+    if (!(name in sb.combos))
+      return `not in the firmware`
+        + (r && (scopeOn(r, scope) || scopeReserved(r, scope))
+          ? `: the next build of ${matched?.name} adds it` : "");
+    return r && (scopeOn(r, scope) || scopeReserved(r, scope)) ? null
+      : `Off for ${matched?.name}: set On or Reserved in Firmware mode, then build`;
+  };
+
+  // A slot combo's output (or `&none`) into its slot; the slots layer after.
+  const writeCombo = async (sl: StudioLayer, slot: number, out: string) => {
+    const r = slotRec(out);
+    if (r) {
+      const p = await placeVd(r, sl);
+      if (typeof p === "string") throw new Error(p);
+      sl = p.sl; out = p.key;
+    }
+    const w = await writeSlots(sl, slot, [out]);
+    if (typeof w === "string") throw new Error(w);
+    return w;
+  };
+
+  // On writes the combo's output, off writes `&none`; the record follows as
+  // On or Reserved for the matched keymap, so the next build agrees.
+  const comboSwitch = async (name: string, on: boolean) => {
+    const r = recordOf(s.store, "combo", name);
+    if (!r || typeof sb === "string" || !kb.slots) return;
+    try {
+      const sl = await writeCombo(kb.slots, sb.combos[name], on ? r.binding || "&none" : "&none");
+      setKb((k) => k && { ...k, slots: sl });
+      setLock({ unlocked: true, unsaved: true });
+    } catch (e: any) {
+      if (e.status === 409 || e.status === 410) return lost(e);
+      return setMsg({ text: e.message, bad: true });
+    }
+    if (await setComboState(s, d, name, on ? "on" : "reserved", scope))
+      setMsg({ text: `${name} switched ${on ? "on" : "off"}; Save to keyboard keeps it` });
   };
 
   // The panel's Save: the record in custom/, then what the keyboard's slots hold.
@@ -602,16 +644,7 @@ export function StudioView() {
       if (mode === "combo") {
         const slot = sb.combos[draft.name];
         if (slot === undefined) return;
-        let out = draft.binding;
-        const r = slotRec(out);
-        if (r) {
-          const p = await placeVd(r, sl);
-          if (typeof p === "string") throw new Error(p);
-          sl = p.sl; out = p.key;
-        }
-        const w = await writeSlots(sl, slot, [out]);
-        if (typeof w === "string") throw new Error(w);
-        sl = w;
+        sl = await writeCombo(sl, slot, draft.binding);
       } else if (at >= 0) {
         const sh = vdShape(draft);
         if (sh === oldShape) {
@@ -724,6 +757,8 @@ export function StudioView() {
     close: () => setEditing(null), pick, setField: setKeyVal, cur: keyVal, why,
     layers: kb.layers.map((l, i): [number, string] => [i, l.name]),
     slotWhy, saveRecord, slots: typeof sb === "string" ? null : sb.settings,
+    scope, switchWhy, comboSwitch,
+    built: (name) => typeof sb === "string" ? null : name in sb.combos,
   };
 
   return (
