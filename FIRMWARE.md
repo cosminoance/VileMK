@@ -3,7 +3,7 @@
 [← back to the README](README.md)
 
 Firmware mode edits keymap files and builds them into firmware. From an
-installed app (see [Getting started](README.md#getting-started)) to a flashed
+installed app (see [Install and start](INSTALL.md)) to a flashed
 keyboard:
 
 - [1. Add your keyboard](#1-add-your-keyboard)

@@ -52,8 +52,11 @@ if errorlevel 1 ( popd & goto :fail )
 popd
 
 %PY% -m vilemk.webui.server %*
-if errorlevel 1 goto :stopped
-exit /b 0
+set "RC=%errorlevel%"
+rem 0 is a normal stop; -1073741510 is Windows' code for a process ended by Ctrl+C.
+if "%RC%"=="0" exit /b 0
+if "%RC%"=="-1073741510" exit /b 0
+goto :stopped
 
 :stopped
 echo.

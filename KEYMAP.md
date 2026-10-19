@@ -184,6 +184,14 @@ with no build. While a Reserved combo is off, pressing its keys together does
 nothing and the keys do not type. Without vile slots, Reserved is the same as
 Off. See [STUDIO.md](STUDIO.md#what-vile-slots-are-for).
 
+| State | In the firmware | Keys pressed together | Studio mode |
+|---|---|---|---|
+| **Off** | Not built | Each key types as usual | Cannot change it |
+| **Reserved** | Built with `&none`, needs vile slots | Nothing happens, the keys do not type | Can switch it On |
+| **On** | Built and active | Sends the combo's output | Can switch it Reserved or change its output |
+
+New combos and changes to a combo's keys, timeout or layers need a build.
+
 <img src=".github/images/tab-combos.png" width="380" alt="The Combo panel: a saved chord's Name, Keys, Output key, Timeout and Layers"> <img src=".github/images/tab-conditional-layers.png" width="380" alt="The Conditional layer panel: a saved tri-layer rule's Name, If layers and Then layer">
 
 [← back to Firmware mode](FIRMWARE.md#behaviours-every-tab-in-the-app)
